@@ -6,13 +6,9 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/Modbus-Data-Logger-v1.3.0
-ExecStart=/usr/bin/npm --prefix server run dev:collector
+ExecStart=/bin/bash -c "cd /root/Modbus-Data-Logger-v1.3.0 && npm --prefix server run dev:collector"
 Restart=always
 RestartSec=10
-Environment=NODE_ENV=production
-
-# Systemd environment variables are quoted, so use export in shell
-ExecStartPre=/bin/bash -c "source /root/.bashrc"
 StandardOutput=journal
 StandardError=journal
 
