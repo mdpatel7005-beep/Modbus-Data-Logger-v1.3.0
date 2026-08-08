@@ -95,6 +95,21 @@ OPC UA sessions are closed. For an isolated development workstation, copy
 npm install
 npm --prefix server install
 npm run dev
+
+## External Network Access
+
+To access the dashboard from other PCs on your local network:
+
+1. Create `.env.local` file with:
+   ```
+   NEXT_PUBLIC_LOGGER_API_URL=http://YOUR_SERVER_IP:4100/api/v1
+   ```
+
+2. Ensure `server/.env` has `HOST=0.0.0.0` (already set by default)
+
+3. Access the dashboard at: http://YOUR_SERVER_IP:3000
+
+The collector API will be available at: http://YOUR_SERVER_IP:4100
 ```
 
 ## Add the first device
