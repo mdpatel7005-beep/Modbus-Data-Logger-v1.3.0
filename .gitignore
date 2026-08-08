@@ -9,6 +9,9 @@ data/*.db
 dist/
 build/
 
+# Wrangler/Cloudflare Worker cache
+.wrangler/
+
 # VS Code and IDE files
 .vscode/
 .idea/
