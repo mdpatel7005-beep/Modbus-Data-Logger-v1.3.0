@@ -893,6 +893,22 @@ export async function registerRoutes(
           message: "Device was not found",
         });
       }
+      if (!postgresHistorian.configured) {
+        database.appendAudit({
+          actorId: request.principal?.id,
+          action: "postgres.device_disconnect_rejected",
+          entityType: "device",
+          entityId: id,
+          details: { message: "PostgreSQL not configured" },
+          sourceIp: request.ip,
+        });
+        return reply.code(400).send({
+          connected: false,
+          message:
+            "Configure and enable Remote PostgreSQL before disconnecting this device",
+          device: existing,
+        });
+      }
       const result = await postgresHistorian.disconnectDevice(id);
       database.appendAudit({
         actorId: request.principal?.id,
@@ -928,6 +944,22 @@ export async function registerRoutes(
         return reply.code(404).send({
           error: "not_found",
           message: "Device was not found",
+        });
+      }
+      if (!postgresHistorian.configured) {
+        database.appendAudit({
+          actorId: request.principal?.id,
+          action: "postgres.device_connect_rejected",
+          entityType: "device",
+          entityId: id,
+          details: { message: "PostgreSQL not configured" },
+          sourceIp: request.ip,
+        });
+        return reply.code(400).send({
+          connected: false,
+          message:
+            "Configure and enable Remote PostgreSQL before connecting this device",
+          device: database.getDevice(id),
         });
       }
       try {

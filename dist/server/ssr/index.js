@@ -11669,7 +11669,7 @@ var client_references_default = {
 		};
 	},
 	"c35d2df888b2": async () => {
-		const m = await import("./assets/LoggerDashboard-tDwWsH6v.js");
+		const m = await import("./assets/LoggerDashboard-vqjZIMai.js");
 		return { get "LoggerDashboard"() {
 			return m["LoggerDashboard"];
 		} };

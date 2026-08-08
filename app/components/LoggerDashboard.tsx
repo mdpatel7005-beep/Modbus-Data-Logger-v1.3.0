@@ -2290,6 +2290,7 @@ function AddDevicePanel({
                 <label className="switch-label" htmlFor="postgres-enabled">
                   <input
                     checked={postgresEnabled}
+                    disabled={!postgresDefaults.configured}
                     id="postgres-enabled"
                     onChange={(event) =>
                       setPostgresEnabled(event.target.checked)
@@ -2325,7 +2326,11 @@ function AddDevicePanel({
                 className={`button ${
                   postgresEnabled ? "secondary" : "primary"
                 }`}
-                disabled={Boolean(postgresAction) || submitting}
+                disabled={
+                  Boolean(postgresAction) ||
+                  submitting ||
+                  !postgresDefaults.configured
+                }
                 onClick={() => void changePostgresConnection("connect")}
                 type="button"
               >
@@ -2338,7 +2343,7 @@ function AddDevicePanel({
                     ? "Verify & repair tables"
                     : "Connect & verify tables"}
               </button>
-              {postgresEnabled ? (
+              {postgresEnabled && postgresDefaults.configured ? (
                 <button
                   className="button secondary"
                   disabled={Boolean(postgresAction) || submitting}
