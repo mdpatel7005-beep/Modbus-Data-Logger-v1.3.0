@@ -1727,7 +1727,7 @@ export async function registerRoutes(
       return {
         id: category.id,
         name: category.name,
-        device_count: category.device_count || 0,
+        deviceCount: category.deviceCount || 0,
         matchingRegisters: matchingRegisters.map(r => ({
           register_id: r.register_id,
           device_name: r.device_name,
