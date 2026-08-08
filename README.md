@@ -103,6 +103,7 @@ To access the dashboard from other PCs on your local network:
 1. Create `.env.local` file with:
    ```
    NEXT_PUBLIC_LOGGER_API_URL=http://YOUR_SERVER_IP:4100/api/v1
+   LOG_LEVEL=debug
    ```
 
 2. Ensure `server/.env` has `HOST=0.0.0.0` (already set by default)
