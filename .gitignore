@@ -1,1 +1,25 @@
 node_modules
+
+# Database files
+data/*.db
+*.sqlite
+*.db
+
+# Build outputs
+dist/
+build/
+
+# VS Code and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables (contains secrets)
+.env
+.env.local
