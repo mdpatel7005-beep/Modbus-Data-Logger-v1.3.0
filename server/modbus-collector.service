@@ -1,0 +1,18 @@
+[Unit]
+Description=Modbus Data Logger Collector
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Modbus-Data-Logger-v1.3.0/server
+ExecStart=/usr/bin/npm run dev:collector
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=HOST=0.0.0.0
+Environment=PORT=4100
+Environment=CORS_ORIGIN=http://localhost:3000,http://localhost:3001,http://192.168.2.*:3000
+
+[Install]
+WantedBy=multi-user.target
