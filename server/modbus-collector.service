@@ -1,12 +1,12 @@
 [Unit]
-Description=Modbus Data Logger Collector
+Description=Modbus Data Logger (Dashboard + Collector)
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/Modbus-Data-Logger-v1.3.0
-ExecStart=/root/Modbus-Data-Logger-v1.3.0/server/scripts/start-collector.sh
+ExecStart=/root/Modbus-Data-Logger-v1.3.0/server/scripts/start-dashboard-collector.sh
 Restart=always
 RestartSec=10
 StandardOutput=journal
