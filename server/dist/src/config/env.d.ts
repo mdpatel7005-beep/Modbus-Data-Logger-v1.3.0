@@ -1,0 +1,26 @@
+export declare const env: {
+    readonly nodeEnv: "development" | "test" | "production";
+    readonly host: string;
+    readonly port: number;
+    readonly logLevel: "error" | "fatal" | "warn" | "info" | "debug" | "trace" | "silent";
+    readonly databasePath: string;
+    readonly corsOrigins: string[];
+    readonly trustProxy: boolean;
+    readonly authDisabled: boolean;
+    readonly jwtSecret: string;
+    readonly jwtIssuer: string;
+    readonly accessTokenTtl: string;
+    readonly initialAdminUsername: string;
+    readonly initialAdminPassword: string;
+    readonly settingsEncryptionKey: string;
+    readonly appVersion: string;
+    readonly licenseActivationDays: number;
+    readonly systemAdminDataDir: string;
+    readonly systemUpdateHelper: string | undefined;
+    readonly openVpnHelper: string | undefined;
+    readonly retentionDays: number;
+    readonly pollingEnabled: boolean;
+    readonly postgresUrl: string | undefined;
+    readonly postgresSsl: boolean;
+    readonly walCheckpointPages: number;
+};

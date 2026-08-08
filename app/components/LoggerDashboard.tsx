@@ -1,0 +1,10593 @@
+"use client";
+
+import {
+  Activity,
+  AlertTriangle,
+  Bell,
+  Cable,
+  Check,
+  ChevronDown,
+  CircleGauge,
+  Clock3,
+  Cloud,
+  Copy,
+  Database,
+  Download,
+  FileChartColumn,
+  LayoutDashboard,
+  KeyRound,
+  LogOut,
+  Menu,
+  MessageCircle,
+  Network,
+  Pencil,
+  Plus,
+  Play,
+  Radio,
+  RefreshCw,
+  Search,
+  Save,
+  ScrollText,
+  Send,
+  ServerCog,
+  Settings,
+  ShieldCheck,
+  SlidersHorizontal,
+  SquareActivity,
+  Table2,
+  Thermometer,
+  Tags,
+  Trash2,
+  Upload,
+  Users,
+  Waves,
+  WifiOff,
+  X,
+  Zap,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { CategoryAlarmsView } from "./CategoryAlarmsView";
+import { ReportsView as NewReportsView } from "./ReportsView";
+import {
+  ApiError,
+  acknowledgeAlarm,
+  acknowledgeSystemAlert,
+  applySystemUpdate,
+  changePassword,
+  connectDevicePostgres,
+  createAlarmGroup,
+  createDeviceClassification,
+  createDevice as createApiDevice,
+  createRegister,
+  createUser,
+  deleteAlarmGroup,
+  deleteDeviceClassification,
+  deleteDevice as deleteApiDevice,
+  disconnectDevicePostgres,
+  deleteRegister,
+  deleteUser,
+  downloadActivityCsv,
+  downloadConfigurationBackup,
+  downloadReadings,
+  factoryReset,
+  fetchAlarmGroups,
+  fetchAlarmGroupDetail,
+  fetchAlarms,
+  fetchActivity,
+  fetchAlarmCategories,
+  createAlarmCategoryRule,
+  fetchAlarmCategoryRules,
+  updateAlarmCategoryRule,
+  deleteAlarmCategoryRule,
+  fetchAlarmCategoryRuleDetail,
+  fetchAlarmCategoryRuleTags,
+  updateAlarmCategoryRuleTags,
+  fetchTagAlarmRules,
+  createTagAlarmRule,
+  deleteTagAlarmRule,
+  updateTagAlarmRule,
+
+  fetchCurrentUser,
+  fetchDataServerSettings,
+  fetchDeviceClassifications,
+  fetchDeviceReadings,
+  fetchDevices,
+  fetchHealth,
+
+  fetchOverview,
+  fetchStorageInfo,
+  fetchPostgresSettings,
+  fetchRegisters,
+  fetchSystemAlerts,
+  fetchSystemSettings,
+  fetchUsers,
+  fetchWhatsAppAlertSettings,
+  importRegisters,
+  login,
+  replayPostgresOfflineCache,
+  resetUserPassword,
+  restoreConfiguration,
+  runPostgresMaintenance,
+  savePostgresSettings,
+
+  saveDataServerSettings,
+  saveWhatsAppAlertSettings,
+  syncHistorianSchema,
+  stageSystemUpdate,
+  setOpenVpnEnabled,
+  testPostgresConnection,
+  testWhatsAppAlertSettings,
+  updateDevice as updateApiDevice,
+  updateRegister,
+  updateUser,
+  uploadOpenVpnProfile,
+  addAlarmGroupMember,
+  removeAlarmGroupMember,
+  createAlarmGroupRule,
+  deleteAlarmGroupRule,
+  type ApiAlarm,
+  type ApiAuditEvent,
+  type ApiTagAlarmRule,
+  type CreateTagAlarmRulePayload,
+
+  type ApiDataServerSettings,
+  type ApiDevice,
+  type ApiDeviceClassification,
+  type ApiDeviceClassifications,
+  type ApiAlarmCategory,
+  type ApiAlarmCategoryRule,
+  type CreateAlarmCategoryRulePayload,
+  type ApiReading,
+  type ApiRegister,
+  type ApiPostgresSettings,
+  type ApiSystemSettings,
+  type ApiStatus,
+  type ApiSystemAlert,
+  type ApiUser,
+  type ApiStorageMetrics,
+  type ApiManagedUser,
+  type ApiRole,
+  type ApiWhatsAppSettings,
+  type ApiAlarmGroup,
+  type AlarmGroupDetail,
+  type CustomerDetailsPayload,
+  type CreateDevicePayload,
+  type CreateRegisterPayload,
+  type DataServerSettingsPayload,
+  type DeviceClassificationKind,
+  type DevicePostgresConnectionResult,
+  type OverviewResponse,
+  type PostgresConnectionTestResult,
+  type PostgresSettingsPayload,
+  type WhatsAppSettingsPayload,
+} from "../lib/api";
+
+import { formatBytes } from "../lib/utils";
+
+type Section =
+  | "overview"
+  | "devices"
+  | "live"
+  | "tags"
+  | "alarms"
+  | "categoryAlarms"
+  | "reports"
+  | "dataConnections"
+  | "administration"
+  | "activity"
+  | "tagAlarms"
+  ;
+
+type DataConnectionTab = "historian" | "protocols";
+type AdministrationTab = "customer" | "users" | "system";
+
+interface NavItem {
+  id: Section;
+  label: string;
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+}
+
+interface Device {
+  id: string;
+  name: string;
+  category: string | null;
+  group: string | null;
+  endpoint: string;
+  protocol: "Modbus TCP" | "Modbus RTU";
+  unitId: number;
+  tags: number;
+  latency: number | null;
+  status: "online" | "warning" | "offline";
+}
+
+interface LiveTag {
+  registerId: string;
+  tag: string;
+  device: string;
+  address: string;
+  value: string;
+  quality: "Good" | "Stale" | "Bad" | "Waiting";
+  updated: string;
+}
+
+const monitorNav: NavItem[] = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "devices", label: "Devices", icon: Network },
+  { id: "live", label: "Live data", icon: SquareActivity },
+];
+
+const workflowNav: NavItem[] = [
+  { id: "alarms", label: "Alerts", icon: AlertTriangle },
+  { id: "categoryAlarms", label: "Category Alarms", icon: Bell },
+  { id: "tagAlarms", label: "Tag Alarms", icon: Bell },
+  { id: "reports", label: "Reports & export", icon: FileChartColumn },
+];
+
+const platformNav: NavItem[] = [
+  {
+    id: "dataConnections",
+    label: "Data connections",
+    icon: Cable,
+  },
+  { id: "administration", label: "Administration", icon: Settings },
+  { id: "activity", label: "Diagnostics & logs", icon: ScrollText },
+];
+
+const defaultOverview: OverviewResponse = {
+  devices: {
+    total: 0,
+    enabled: 0,
+    online: 0,
+    warning: 0,
+    offline: 0,
+    disabled: 0,
+  },
+  tags: { active: 0, samplesToday: 0 },
+  alarms: { active: 0, critical: 0 },
+  performance: { averagePollMs: 0, successRate: 0 },
+  deviceSummaries: [],
+  sampleTrend: [],
+  activitySummary: {
+    lastSampleAt: null,
+    samplesLastHour: 0,
+    samplesLast24Hours: 0,
+    statusTransitionsLast24Hours: 0,
+  },
+};
+
+const defaultPostgresSettings: ApiPostgresSettings = {
+  enabled: false,
+  host: "",
+  port: 5432,
+  database: "modbus_logger",
+  username: "logger",
+  sslMode: "require",
+  autoDownsampleEnabled: true,
+  defaultRawTable: "modbus_raw",
+  defaultDownsampleTable: "modbus_1m",
+  defaultDownsampleIntervalSec: 60,
+  rawRetentionDays: 30,
+  downsampleRetentionDays: 365,
+  maintenanceIntervalHours: 24,
+  historianTimezone: "UTC",
+  offlineCacheEnabled: true,
+  offlineCacheMaxRows: 100000,
+  offlineCacheQueuedRows: 0,
+  offlineCacheOldestAt: null,
+  lastReplayAt: null,
+  lastReplayCount: 0,
+  configured: false,
+  passwordConfigured: false,
+  source: "none",
+  lastConnectionTestAt: null,
+  lastConnectionTestOk: null,
+  lastConnectionTestMessage: null,
+  lastMaintenanceAt: null,
+  lastMaintenanceRawDeleted: 0,
+  lastMaintenanceDownsampleDeleted: 0,
+  updatedAt: null,
+};
+
+const defaultWhatsAppSettings: ApiWhatsAppSettings = {
+  enabled: false,
+  graphApiVersion: "",
+  phoneNumberId: "",
+  recipients: [],
+  templateName: "",
+  language: "en_US",
+  sendRecovery: true,
+  offlineDelaySeconds: 60,
+  accessTokenConfigured: false,
+  lastTestAt: null,
+  lastTestOk: null,
+  lastTestMessage: null,
+  updatedAt: null,
+};
+
+const emptyDeviceClassifications: ApiDeviceClassifications = {
+  categories: [],
+  groups: [],
+};
+
+function formatInteger(value: number) {
+  return new Intl.NumberFormat("en-IN").format(value);
+}
+
+function saveIntervalSeconds(saveIntervalMs: number) {
+  return Number((saveIntervalMs / 1000).toFixed(3));
+}
+
+function formatSaveInterval(saveIntervalMs: number) {
+  return `${new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 3,
+  }).format(saveIntervalSeconds(saveIntervalMs))} s`;
+}
+
+function formatDateTime(value: string | null) {
+  return value ? new Date(value).toLocaleString() : "Not yet";
+}
+
+function formatHistorianPreviewTimestamp(timeZone: string) {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+      timeZoneName: "shortOffset",
+      hour12: false,
+    }).format(new Date("2026-07-25T09:00:01.000Z"));
+  } catch {
+    return "2026-07-25 09:00:01.000 UTC";
+  }
+}
+
+function formatHistorianPreviewValue(decimalPlaces: number) {
+  return (123.456789).toFixed(decimalPlaces);
+}
+
+const userRoles: ApiRole[] = [
+  "administrator",
+  "operator",
+  "viewer",
+  "diagnostic",
+];
+
+function roleLabel(role: ApiRole) {
+  if (role === "viewer") return "Monitoring only";
+  if (role === "diagnostic") return "Diagnostic";
+  return `${role.charAt(0).toUpperCase()}${role.slice(1)}`;
+}
+
+function localDateTimeToIso(value: string) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+const tagCsvHeaders = [
+  "name",
+  "address",
+  "functionCode",
+  "dataType",
+  "byteOrder",
+  "scale",
+  "offset",
+  "unit",
+  "decimalPlaces",
+  "enabled",
+] as const;
+const maxTagCsvBytes = 2 * 1024 * 1024;
+const maxTagCsvRows = 1500;
+const liveDataPageSize = 100;
+
+function normalizeHistorianColumn(value: string) {
+  const normalized = value
+    .normalize("NFKD")
+    .replaceAll(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "_")
+    .replaceAll(/^_+|_+$/g, "");
+  const safeName = /^[a-z]/.test(normalized)
+    ? normalized
+    : `tag_${normalized || "value"}`;
+  return safeName.slice(0, 63);
+}
+
+function escapeCsvCell(value: string | number | boolean) {
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function parseCsvDocument(source: string) {
+  const text = source.replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  let quoteClosed = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (quoted) {
+      if (character === '"' && text[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (character === '"') {
+        quoted = false;
+        quoteClosed = true;
+      } else {
+        field += character;
+      }
+      continue;
+    }
+
+    if (
+      quoteClosed &&
+      character !== "," &&
+      character !== "\r" &&
+      character !== "\n"
+    ) {
+      throw new Error(
+        `Unexpected character after a closing quote at position ${index + 1}.`,
+      );
+    }
+    if (character === '"') {
+      if (field.length !== 0) {
+        throw new Error(
+          `Unexpected quote in an unquoted field at position ${index + 1}.`,
+        );
+      }
+      quoted = true;
+      quoteClosed = false;
+    } else if (character === ",") {
+      row.push(field);
+      field = "";
+      quoteClosed = false;
+    } else if (character === "\r" || character === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+      quoteClosed = false;
+      if (character === "\r" && text[index + 1] === "\n") index += 1;
+    } else {
+      field += character;
+    }
+  }
+
+  if (quoted) throw new Error("The CSV contains an unterminated quoted field.");
+  if (field || row.length > 0 || quoteClosed) {
+    row.push(field);
+    rows.push(row);
+  }
+  while (
+    rows.length > 0 &&
+    rows[rows.length - 1].length === 1 &&
+    rows[rows.length - 1][0] === ""
+  ) {
+    rows.pop();
+  }
+  return rows;
+}
+
+function validateTagCsv(
+  source: string,
+  currentRegisters: ApiRegister[],
+): CreateRegisterPayload[] {
+  const rows = parseCsvDocument(source);
+  if (rows.length === 0) throw new Error("The CSV file is empty.");
+  if (
+    rows[0].length !== tagCsvHeaders.length ||
+    !tagCsvHeaders.every((header, index) => rows[0][index] === header)
+  ) {
+    throw new Error(`The header must be exactly: ${tagCsvHeaders.join(",")}`);
+  }
+  if (rows.length === 1) {
+    throw new Error("The CSV template has no tag rows to import.");
+  }
+  if (rows.length - 1 > maxTagCsvRows) {
+    throw new Error(
+      `A tag CSV can contain at most ${maxTagCsvRows} data rows. Split this file into smaller imports.`,
+    );
+  }
+
+  const existingNames = new Set(
+    currentRegisters.map((register) =>
+      register.name.trim().toLocaleLowerCase(),
+    ),
+  );
+  const existingHistorianColumns = new Set(
+    currentRegisters.map(
+      (register) =>
+        register.historianColumn ??
+        normalizeHistorianColumn(register.name.trim()),
+    ),
+  );
+  const batchNames = new Set<string>();
+  const batchHistorianColumns = new Set<string>();
+  const payloads: CreateRegisterPayload[] = [];
+  const errors: string[] = [];
+  const dataTypes = new Set<ApiRegister["dataType"]>([
+    "bool",
+    "uint16",
+    "int16",
+    "uint32",
+    "int32",
+    "float32",
+    "float64",
+  ]);
+  const byteOrders = new Set<ApiRegister["byteOrder"]>([
+    "ABCD",
+    "BADC",
+    "CDAB",
+    "DCBA",
+  ]);
+
+  rows.slice(1).forEach((columns, rowIndex) => {
+    const line = rowIndex + 2;
+    if (columns.length !== tagCsvHeaders.length) {
+      errors.push(
+        `Row ${line}: expected ${tagCsvHeaders.length} columns, found ${columns.length}.`,
+      );
+      return;
+    }
+    const [
+      rawName,
+      rawAddress,
+      rawFunctionCode,
+      rawDataType,
+      rawByteOrder,
+      rawScale,
+      rawOffset,
+      rawUnit,
+      rawDecimalPlaces,
+      rawEnabled,
+    ] = columns;
+    const name = rawName.trim();
+    const normalizedName = name.toLocaleLowerCase();
+    const historianColumn = normalizeHistorianColumn(name);
+    const address = Number(rawAddress);
+    const functionCode = Number(rawFunctionCode);
+    const scale = Number(rawScale);
+    const offset = Number(rawOffset);
+    const decimalPlaces = Number(rawDecimalPlaces);
+    const enabledText = rawEnabled.trim().toLocaleLowerCase();
+    const rowErrors: string[] = [];
+
+    if (!name || name.length > 120)
+      rowErrors.push("name must be 1–120 characters");
+    if (existingNames.has(normalizedName)) {
+      rowErrors.push(`tag name "${name}" already exists`);
+    } else if (batchNames.has(normalizedName)) {
+      rowErrors.push(`tag name "${name}" is duplicated in this file`);
+    }
+    if (existingHistorianColumns.has(historianColumn)) {
+      rowErrors.push(
+        `PostgreSQL column "${historianColumn}" already belongs to another tag; add this tag manually to choose a different column`,
+      );
+    } else if (batchHistorianColumns.has(historianColumn)) {
+      rowErrors.push(
+        `PostgreSQL column "${historianColumn}" is duplicated in this file after tag-name normalization`,
+      );
+    }
+    if (
+      rawAddress.trim() === "" ||
+      !Number.isInteger(address) ||
+      address < 0 ||
+      address > 65535
+    ) {
+      rowErrors.push("address must be an integer from 0 to 65535");
+    }
+    if (![1, 2, 3, 4].includes(functionCode)) {
+      rowErrors.push("functionCode must be 1, 2, 3, or 4");
+    }
+    if (!dataTypes.has(rawDataType as ApiRegister["dataType"])) {
+      rowErrors.push("dataType is not supported");
+    }
+    if (!byteOrders.has(rawByteOrder as ApiRegister["byteOrder"])) {
+      rowErrors.push("byteOrder must be ABCD, BADC, CDAB, or DCBA");
+    }
+    if (rawScale.trim() === "" || !Number.isFinite(scale)) {
+      rowErrors.push("scale must be a number");
+    }
+    if (rawOffset.trim() === "" || !Number.isFinite(offset)) {
+      rowErrors.push("offset must be a number");
+    }
+    if (rawUnit.trim().length > 32) {
+      rowErrors.push("unit must be at most 32 characters");
+    }
+    if (
+      rawDecimalPlaces.trim() === "" ||
+      !Number.isInteger(decimalPlaces) ||
+      decimalPlaces < 0 ||
+      decimalPlaces > 10
+    ) {
+      rowErrors.push("decimalPlaces must be an integer from 0 to 10");
+    }
+    if (enabledText !== "true" && enabledText !== "false") {
+      rowErrors.push("enabled must be true or false");
+    }
+
+    if (rowErrors.length > 0) {
+      errors.push(`Row ${line}: ${rowErrors.join("; ")}.`);
+      return;
+    }
+    batchNames.add(normalizedName);
+    batchHistorianColumns.add(historianColumn);
+    payloads.push({
+      name,
+      historianColumn,
+      address,
+      functionCode: functionCode as ApiRegister["functionCode"],
+      dataType: rawDataType as ApiRegister["dataType"],
+      byteOrder: rawByteOrder as ApiRegister["byteOrder"],
+      scale,
+      offset,
+      unit: rawUnit.trim(),
+      decimalPlaces,
+      enabled: enabledText === "true",
+    });
+  });
+
+  if (errors.length > 0) {
+    const visible = errors.slice(0, 5).join(" ");
+    const remaining = errors.length - 5;
+    throw new Error(
+      remaining > 0 ? `${visible} ${remaining} more row errors.` : visible,
+    );
+  }
+  return payloads;
+}
+
+function downloadCsv(
+  filename: string,
+  rows: Array<Array<string | number | boolean>>,
+) {
+  const contents = rows
+    .map((row) => row.map((cell) => escapeCsvCell(cell)).join(","))
+    .join("\r\n");
+  const url = URL.createObjectURL(
+    new Blob([`${contents}\r\n`], { type: "text/csv;charset=utf-8" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function SectionIntro({
+  eyebrow,
+  title,
+  copy,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  copy: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="section-intro">
+      <div>
+        <p className="eyebrow">{eyebrow}</p>
+        <h2>{title}</h2>
+        <p className="intro-copy">{copy}</p>
+      </div>
+      {children ? <div className="button-row">{children}</div> : null}
+    </div>
+  );
+}
+
+function WorkspaceTabs<T extends string>({
+  label,
+  tabs,
+  value,
+  onChange,
+}: {
+  label: string;
+  tabs: Array<{
+    id: T;
+    label: string;
+    description: string;
+    icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+  }>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <nav aria-label={label} className="workspace-tabs">
+      {tabs.map((tab) => {
+        const Icon = tab.icon;
+        const selected = tab.id === value;
+        return (
+          <button
+            aria-current={selected ? "page" : undefined}
+            className={`workspace-tab${selected ? " active" : ""}`}
+            key={tab.id}
+            onClick={() => onChange(tab.id)}
+            type="button"
+          >
+            <span className="workspace-tab-icon">
+              <Icon size={16} strokeWidth={1.8} />
+            </span>
+            <span>
+              <strong>{tab.label}</strong>
+              <small>{tab.description}</small>
+            </span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function StatusPill({
+  status,
+  children,
+}: {
+  status: "online" | "warning" | "offline" | "critical" | "waiting";
+  children: React.ReactNode;
+}) {
+  return <span className={`status-pill ${status}`}>{children}</span>;
+}
+
+function KpiCard({
+  icon: Icon,
+  value,
+  label,
+  delta,
+  tint,
+  color,
+}: {
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+  value: string;
+  label: string;
+  delta: string;
+  tint: string;
+  color: string;
+}) {
+  return (
+    <article
+      className="kpi-card"
+      style={
+        {
+          "--kpi-tint": tint,
+          "--kpi-color": color,
+        } as React.CSSProperties
+      }
+    >
+      <div className="kpi-top">
+        <span className="kpi-icon">
+          <Icon size={16} strokeWidth={1.8} />
+        </span>
+        <span className="kpi-delta">{delta}</span>
+      </div>
+      <p className="kpi-value">{value}</p>
+      <p className="kpi-label">{label}</p>
+    </article>
+  );
+}
+
+function Overview({
+  overview,
+  onNavigate,
+  onRefresh,
+  refreshing,
+  username,
+  canAddDevice,
+  connected,
+  currentUser: propCurrentUser,
+  storageInfo: propStorageInfo,
+}: {
+  overview: OverviewResponse;
+  onNavigate: (section: Section) => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+  username: string;
+  canAddDevice: boolean;
+  connected: boolean;
+  currentUser?: { role: string } | null;
+  storageInfo?: ApiStorageMetrics | null;
+}) {
+  const attentionCount =
+    overview.devices.warning + overview.devices.offline;
+  const healthCopy =
+    !connected
+      ? "The collector is unavailable, so configured devices and current activity cannot be loaded."
+      : overview.devices.total === 0
+      ? "No devices are configured yet. Add a device to begin collecting live process data."
+      : overview.devices.enabled === 0
+        ? `All ${overview.devices.disabled} configured devices are intentionally disabled.`
+      : attentionCount === 0
+        ? `All ${overview.devices.enabled} enabled devices are communicating normally.`
+        : `${attentionCount} enabled ${attentionCount === 1 ? "device needs" : "devices need"} attention and ${overview.alarms.active} alerts are active.`;
+  const trend = overview.sampleTrend.map((point) => ({
+    time: new Date(point.bucketStart).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    samples: point.samples,
+  }));
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Configured plant · Live"
+        title={username ? `Welcome, ${username}` : "Logger overview"}
+        copy={healthCopy}
+      >
+        <button
+          aria-label="Refresh overview"
+          className="button secondary"
+          disabled={refreshing}
+          onClick={onRefresh}
+          type="button"
+        >
+          <RefreshCw className={refreshing ? "spin-icon" : undefined} size={14} />
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+        {canAddDevice ? (
+          <button
+            className="button primary"
+            disabled={!connected}
+            onClick={() => onNavigate("devices")}
+            type="button"
+          >
+            <Plus size={14} />
+            Add device
+          </button>
+        ) : null}
+      </SectionIntro>
+
+      <div className="kpi-grid">
+        <KpiCard
+          icon={Network}
+          value={
+            connected
+              ? `${overview.devices.online} / ${overview.devices.enabled}`
+              : "—"
+          }
+          label="Devices online"
+          delta={
+            connected
+              ? `${overview.devices.warning} warning · ${overview.devices.offline} offline · ${overview.devices.disabled} disabled`
+              : "Collector unavailable"
+          }
+          tint="#e4f3ef"
+          color="#086c58"
+        />
+        <KpiCard
+          icon={Radio}
+          value={connected ? formatInteger(overview.tags.active) : "—"}
+          label="Active data tags"
+          delta={connected ? "Polling now" : "Not available"}
+          tint="#e9f2fb"
+          color="#2c73a8"
+        />
+        <KpiCard
+          icon={AlertTriangle}
+          value={connected ? String(overview.alarms.active) : "—"}
+          label="Active alerts"
+          delta={connected ? `${overview.alarms.critical} critical` : "Not available"}
+          tint="#fdebe8"
+          color="#c7473a"
+        />
+        <KpiCard
+          icon={Clock3}
+          value={
+            connected ? `${overview.performance.averagePollMs} ms` : "—"
+          }
+          label="Average poll latency"
+          delta={
+            connected
+              ? `${overview.performance.successRate}% of enabled devices online`
+              : "Not available"
+          }
+          tint="#fff3db"
+          color="#b66e0d"
+        />
+      </div>
+
+      {/* Storage Metrics - shown only to admin/diagnostic */}
+      {propCurrentUser?.role === "administrator" || propCurrentUser?.role === "diagnostic" ? (
+        <StorageMetricsPanel storageInfo={propStorageInfo ?? null} connected={connected} />
+      ) : null}
+
+      <div className="overview-grid">
+        <section className="panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Collection trend</h3>
+              <p>Samples written per UTC hour · Last 24 hours</p>
+            </div>
+            <button
+              className="button secondary"
+              onClick={() => onNavigate("live")}
+              type="button"
+            >
+              Live view
+              <ChevronDown size={13} />
+            </button>
+          </div>
+          {trend.length > 0 ? (
+            <div className="chart-wrap" aria-label="Sample collection chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={trend}
+                  margin={{ top: 10, right: 16, left: -8, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient
+                      id="overview-sample-fill"
+                      x1="0"
+                      x2="0"
+                      y1="0"
+                      y2="1"
+                    >
+                      <stop offset="0%" stopColor="#33b494" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#33b494" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    stroke="#e9eeec"
+                    strokeDasharray="3 3"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="time"
+                    axisLine={false}
+                    interval={3}
+                    tick={{ fill: "#7a8683", fontSize: 9 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    axisLine={false}
+                    tick={{ fill: "#7a8683", fontSize: 9 }}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      border: "1px solid #dde3e1",
+                      borderRadius: "10px",
+                      boxShadow: "0 10px 30px rgba(31,54,49,.1)",
+                      fontSize: "10px",
+                    }}
+                    formatter={(value) => [
+                      formatInteger(Number(value)),
+                      "Samples",
+                    ]}
+                  />
+                  <Area
+                    dataKey="samples"
+                    dot={false}
+                    fill="url(#overview-sample-fill)"
+                    stroke="#086c58"
+                    strokeWidth={2.2}
+                    type="monotone"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="empty-state overview-empty-state">
+              <div>
+                <span className="empty-state-icon">
+                  <Activity size={20} />
+                </span>
+                <h3>
+                  {connected
+                    ? "No collection history yet"
+                    : "Collector unavailable"}
+                </h3>
+                <p>
+                  {connected
+                    ? "The graph will appear after the first samples are stored."
+                    : "Reconnect the collector to load the collection trend."}
+                </p>
+              </div>
+            </div>
+          )}
+          <div className="chart-legend">
+            <span className="legend-item">
+              <span
+                className="legend-swatch"
+                style={{ background: "#086c58" }}
+              />
+              Stored samples
+            </span>
+          </div>
+        </section>
+
+        <div className="side-panels">
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <h3>Device health</h3>
+                <p>Communication status</p>
+              </div>
+              <button
+                aria-label="Refresh device status"
+                className="icon-button"
+                disabled={refreshing}
+                onClick={onRefresh}
+                type="button"
+              >
+                <RefreshCw
+                  className={refreshing ? "spin-icon" : undefined}
+                  size={14}
+                />
+              </button>
+            </div>
+            <div className="device-stack">
+              {overview.deviceSummaries.length > 0 ? (
+                overview.deviceSummaries.slice(0, 5).map((device) => (
+                  <button
+                    className="device-row overview-device-row"
+                    key={device.id}
+                    onClick={() => onNavigate("devices")}
+                    title={device.lastError ?? undefined}
+                    type="button"
+                  >
+                    <span className="device-icon">
+                      <Cable size={15} />
+                    </span>
+                    <span className="device-info">
+                      <strong>{device.name}</strong>
+                      <small>
+                        {device.endpoint} · {device.tagCount} tags
+                      </small>
+                    </span>
+                    <StatusPill
+                      status={
+                        device.status === "disabled"
+                          ? "offline"
+                          : device.status
+                      }
+                    >
+                      {device.status}
+                    </StatusPill>
+                  </button>
+                ))
+              ) : (
+                <div className="device-choice-empty">
+                  <Network size={20} />
+                  <p>
+                    {connected
+                      ? "No configured devices"
+                      : "Configured devices unavailable"}
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <h3>Database storage</h3>
+                <p>Total data size and growth today</p>
+              </div>
+              <Database size={16} color="#086c58" />
+            </div>
+            {connected && propStorageInfo ? (
+              <div className="storage-metrics-overview">
+                <div className="storage-total-size">
+                  <strong>{formatBytes(propStorageInfo.summary.totalDataSizeBytes)}</strong>
+                  <span>Total stored</span>
+                </div>
+                <div className="storage-growth">
+                  <strong>+{formatInteger(propStorageInfo.readingsGrowth.today)} readings</strong>
+                  <span>Today</span>
+                </div>
+              </div>
+            ) : (
+              <p className="empty-state">{connected ? "No storage data available" : "Collector unavailable"}</p>
+            )}
+          </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <h3>Logger activity</h3>
+                <p>{formatInteger(overview.tags.samplesToday)} samples today</p>
+              </div>
+              <Activity size={16} color="#086c58" />
+            </div>
+            <div className="activity">
+              <div className="activity-metrics overview-activity-metrics">
+                <div className="mini-stat">
+                  <strong>
+                    {connected
+                      ? formatInteger(
+                          overview.activitySummary.samplesLastHour,
+                        )
+                      : "—"}
+                  </strong>
+                  <span>Last hour</span>
+                </div>
+                <div className="mini-stat">
+                  <strong>
+                    {connected
+                      ? formatInteger(
+                          overview.activitySummary.samplesLast24Hours,
+                        )
+                      : "—"}
+                  </strong>
+                  <span>Last 24 hours</span>
+                </div>
+                <div className="mini-stat">
+                  <strong>
+                    {connected
+                      ? formatInteger(
+                          overview.activitySummary.statusTransitionsLast24Hours,
+                        )
+                      : "—"}
+                  </strong>
+                  <span>Status changes</span>
+                </div>
+              </div>
+              <p className="overview-last-sample">
+                Last sample:{" "}
+                <strong>
+                  {connected
+                    ? formatDateTime(overview.activitySummary.lastSampleAt)
+                    : "Unavailable"}
+                </strong>
+              </p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function mapApiDevice(device: ApiDevice): Device {
+  return {
+    id: device.id,
+    name: device.name,
+    category: device.categoryName,
+    group: device.groupName,
+    endpoint:
+      device.protocol === "tcp"
+        ? `${device.tcpHost}:${device.tcpPort}`
+        : `${device.serialPort} · ${device.baudRate} baud`,
+    protocol: device.protocol === "tcp" ? "Modbus TCP" : "Modbus RTU",
+    unitId: device.unitId,
+    tags: device.tagCount,
+    latency: device.lastPollMs,
+    status: device.status === "disabled" ? "offline" : device.status,
+  };
+}
+
+function deviceHistorianTableNames(name: string) {
+  let base = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  if (!base) base = "device";
+  if (/^[0-9]/.test(base)) base = `device_${base}`;
+  return {
+    raw: `${base}_raw`,
+    downsample: `${base}_summary`,
+  };
+}
+
+function StorageMetricsPanel({
+  storageInfo,
+  connected,
+}: {
+  storageInfo: ApiStorageMetrics | null;
+  connected: boolean;
+}) {
+  // Show nothing while still loading (no confusing "unavailable" message)
+  if (!connected || !storageInfo) {
+    return null;
+  }
+
+  const { fileInfo, summary, tables, readingsGrowth } = storageInfo;
+  const diskWarning = summary?.diskUsage?.warningLevel ?? "ok";
+  const stalePct = summary?.downsampleStats?.stalePercentage ?? 0;
+  const hasWarning = diskWarning !== "ok" || stalePct > 50;
+
+  return (
+    <div className="panel" style={{ marginTop: "1rem" }}>
+      {/* Header */}
+      <div className="panel-header">
+        <div className="panel-title">
+          <h3>Database Storage</h3>
+          <p>
+            Last updated: {fileInfo?.modified ? new Date(fileInfo.modified).toLocaleString() : "unknown"}
+          </p>
+        </div>
+      </div>
+
+      {/* Disk Usage Warning Banner */}
+      {hasWarning && (
+        <div
+          style={{
+            padding: "0.75rem 1rem",
+            margin: "0.75rem 1rem 0.75rem 1.25rem",
+            borderRadius: "6px",
+            background: diskWarning === "critical" ? "#fee2e2" : "#fef3c7",
+            border: `1px solid ${diskWarning === "critical" ? "#fca5a5" : "#fde68a"}`,
+            fontSize: "0.875rem",
+          }}
+        >
+          {diskWarning === "critical" ? "\uD83D\uDD34" : "\uD83D\uDFE1"}{" "}
+          <strong>Storage Alert:</strong>{" "}
+          {diskWarning === "critical"
+            ? `Database storage usage exceeds 90%! Immediate action required.`
+            : `Database storage usage exceeds 75%. Plan for expansion soon.`}
+        </div>
+      )}
+
+      {/* Storage KPI Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", padding: "1rem 1.25rem" }}>
+        <StorageKpiCard label="Total Database Size" value={fileInfo?.sizeHuman ?? "\u2014"} color="#1e293b" bg="#f8fafc" border="#e2e8f0" />
+        <StorageKpiCard
+          label="Disk Usage"
+          value={`${summary?.diskUsage?.usedPercent ?? "?"}%`}
+          color={diskWarning === "critical" ? "#dc2626" : diskWarning === "warning" ? "#d97706" : "#16a34a"}
+          bg={diskWarning === "critical" ? "#fef2f2" : diskWarning === "warning" ? "#fffbeb" : "#f0fdf4"}
+          border={diskWarning === "critical" ? "#fecaca" : diskWarning === "warning" ? "#fef08a" : "#bbf7d0"}
+        />
+        <StorageKpiCard
+          label="Stale Data %"
+          value={`${stalePct}%`}
+          color={stalePct > 50 ? "#dc2626" : "#16a34a"}
+          bg={stalePct > 50 ? "#fef2f2" : "#f0fdf4"}
+          border={stalePct > 50 ? "#fecaca" : "#bbf7d0"}
+        />
+        {readingsGrowth && readingsGrowth.changePercent !== null && (
+          <StorageKpiCard
+            label="Today's Readings"
+            value={formatInteger(readingsGrowth.today)}
+            color="#0369a1"
+            bg="#f0f9ff"
+            border="#bae6fd"
+            sublabel={`${readingsGrowth.changePercent > 0 ? "\u2191" : readingsGrowth.changePercent < 0 ? "\u2193" : "\u2192"} ${Math.abs(readingsGrowth.changePercent)}% vs yesterday`}
+          />
+        )}
+      </div>
+
+      {/* Top Tables List */}
+      {tables && tables.length > 0 && (
+        <div style={{ padding: "0 1.25rem 1rem" }}>
+          <h4 style={{ fontSize: "0.875rem", fontWeight: "600", color: "#475569", marginBottom: "0.5rem" }}>Top Tables by Size</h4>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+                <th style={{ textAlign: "left", padding: "0.5rem", color: "#64748b" }}>Table</th>
+                <th style={{ textAlign: "right", padding: "0.5rem", color: "#64748b" }}>Rows</th>
+                <th style={{ textAlign: "right", padding: "0.5rem", color: "#64748b" }}>Size</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tables.slice(0, 8).map((table) => (
+                <tr key={table.name} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                  <td style={{ padding: "0.5rem", fontWeight: "500" }}>{table.name}</td>
+                  <td style={{ padding: "0.5rem", textAlign: "right", color: "#64748b" }}>{formatInteger(table.rows)}</td>
+                  <td style={{ padding: "0.5rem", textAlign: "right", color: "#64748b" }}>{table.sizeHuman}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Downsample Stats */}
+      {summary?.downsampleStats?.enabled && (
+        <div style={{ padding: "0 1.25rem 1rem" }}>
+          <h4 style={{ fontSize: "0.875rem", fontWeight: "600", color: "#475569", marginBottom: "0.5rem" }}>Downsample Stats</h4>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.75rem" }}>
+            <StorageStatCard label="Avg Samples/Bucket" value={String(summary.downsampleStats.avgSamplesPerBucket ?? "?")} />
+            {summary.downsampleStats.stalePercentage !== null && (
+              <StorageStatCard
+                label="Stale Data"
+                value={`${summary.downsampleStats.stalePercentage}%`}
+                alert={stalePct > 50}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Vacuum Alert */}
+      {summary?.needsVacuum && (
+        <div style={{ padding: "0.75rem 1.25rem", margin: "0 1rem 1rem" }}>
+          <div style={{
+            padding: "0.75rem",
+            background: "#fef3c7",
+            border: "1px solid #fde68a",
+            borderRadius: "6px",
+            fontSize: "0.875rem",
+          }}>
+            \u26A0\uFE0F Database may need VACUUM to reclaim space. Run maintenance in System Settings.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StorageKpiCard({ label, value, color, bg, border, sublabel }: {
+  label: string;
+  value: string;
+  color: string;
+  bg: string;
+  border: string;
+  sublabel?: string;
+}) {
+  return (
+    <div style={{ padding: "1rem", borderRadius: "8px", background: bg, border: `1px solid ${border}` }}>
+      <div style={{ fontSize: "0.75rem", color: "#64748b", marginBottom: "0.25rem" }}>{label}</div>
+      <div style={{ fontSize: "1.5rem", fontWeight: "bold", color }}>{value}</div>
+      {sublabel && <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.25rem" }}>{sublabel}</div>}
+    </div>
+  );
+}
+
+function StorageStatCard({ label, value, alert }: {
+  label: string;
+  value: string;
+  alert?: boolean;
+}) {
+  return (
+    <div style={{
+      padding: "0.75rem",
+      background: alert ? "#fef2f2" : "#f8fafc",
+      borderRadius: "6px",
+      border: `1px solid ${alert ? "#fecaca" : "#e2e8f0"}`,
+    }}>
+      <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{label}</div>
+      <div style={{ fontSize: "1.125rem", fontWeight: "600", color: alert ? "#dc2626" : "#1e293b" }}>{value}</div>
+    </div>
+  );
+}
+
+function DevicesView({
+  canAdd,
+  canManage,
+  onManageTags,
+  onOpenClassificationSettings,
+  onOpenPostgresSettings,
+  onToast,
+  token,
+  connected,
+}: {
+  canAdd: boolean;
+  canManage: boolean;
+  onManageTags: (deviceId: string) => void;
+  onOpenClassificationSettings: () => void;
+  onOpenPostgresSettings: () => void;
+  onToast: (text: string) => void;
+  token?: string;
+  connected: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [items, setItems] = useState<Device[]>([]);
+  const [apiItems, setApiItems] = useState<ApiDevice[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingDevice, setEditingDevice] = useState<ApiDevice | null>(null);
+  const [deletingId, setDeletingId] = useState("");
+
+  async function loadDevices() {
+    if (!connected) return;
+    try {
+      const response = await fetchDevices(token);
+      setApiItems(response);
+      setItems(response.map(mapApiDevice));
+    } catch {
+      onToast("Could not refresh devices");
+    }
+  }
+
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    fetchDevices(token)
+      .then((response) => {
+        if (active) {
+          setApiItems(response);
+          setItems(response.map(mapApiDevice));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [connected, token]);
+
+  const filtered = items.filter((device) =>
+    `${device.name} ${device.category ?? ""} ${device.group ?? ""} ${
+      device.endpoint
+    } ${device.protocol}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+
+  function openNewDevice() {
+    if (!canAdd) return;
+    setEditingDevice(null);
+    setShowForm(true);
+  }
+
+  function openEditDevice(deviceId: string) {
+    if (!canManage) return;
+    const device = apiItems.find((item) => item.id === deviceId);
+    if (!device) {
+      onToast("Refresh the device list before editing");
+      return;
+    }
+    setEditingDevice(device);
+    setShowForm(true);
+  }
+
+  async function removeDevice(device: Device) {
+    if (!canManage) return;
+    if (
+      !window.confirm(
+        `Delete ${device.name}? Its tags and logger history links will also be removed. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(device.id);
+    try {
+      await deleteApiDevice(device.id, token);
+      if (editingDevice?.id === device.id) {
+        setEditingDevice(null);
+        setShowForm(false);
+      }
+      await loadDevices();
+      onToast(`${device.name} deleted`);
+    } catch (requestError) {
+      onToast(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "The device could not be deleted",
+      );
+    } finally {
+      setDeletingId("");
+    }
+  }
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Connectivity"
+        title="Devices"
+        copy="Configure Modbus TCP gateways and serial RTU devices, then monitor poll health from one place."
+      >
+        <button
+          className="button secondary"
+          onClick={() => void loadDevices()}
+          type="button"
+        >
+          <RefreshCw size={14} />
+          Discover
+        </button>
+        <button
+          className="button primary"
+          disabled={!connected || !canAdd}
+          onClick={openNewDevice}
+          title={
+            !canAdd
+              ? "This account is read-only"
+              : !connected
+                ? "Connect the collector before adding a device"
+                : "Add a device"
+          }
+          type="button"
+        >
+          <Plus size={14} />
+          Add device
+        </button>
+      </SectionIntro>
+
+      {!canManage ? (
+        <p className="permission-banner">
+          {canAdd
+            ? "Operator access can add devices. Administrator access is required to edit or delete existing devices."
+            : "This account is read-only. Operator or administrator access is required to add devices."}
+        </p>
+      ) : null}
+
+      {showForm ? (
+        <AddDevicePanel
+          key={editingDevice?.id ?? "new-device"}
+          canManageSettings={canManage}
+          connected={connected}
+          device={editingDevice ?? undefined}
+          onCancel={() => {
+            setShowForm(false);
+            setEditingDevice(null);
+          }}
+          onSaved={async (result) => {
+            const wasEditing = Boolean(editingDevice);
+            if (result?.keepOpen) {
+              if (result.device) setEditingDevice(result.device);
+              await loadDevices();
+              if (result.message) onToast(result.message);
+              return;
+            }
+            setShowForm(false);
+            setEditingDevice(null);
+            await loadDevices();
+            onToast(
+              wasEditing
+                ? "Device changes saved and collector reloaded"
+                : "Device added and polling started",
+            );
+          }}
+          onOpenClassificationSettings={onOpenClassificationSettings}
+          onOpenPostgresSettings={onOpenPostgresSettings}
+          token={token}
+        />
+      ) : null}
+
+      <section className="panel table-panel">
+        <div className="table-toolbar">
+          <div className="search-field">
+            <Search size={14} />
+            <input
+              aria-label="Search devices"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search device, category, group, IP, or protocol"
+              value={query}
+            />
+          </div>
+          <div className="button-row">
+            <button
+              className="button secondary"
+              onClick={() => onToast("Filters cleared")}
+              type="button"
+            >
+              <SlidersHorizontal size={13} />
+              Filters
+            </button>
+          </div>
+        </div>
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>Category</th>
+                <th>Group</th>
+                <th>Protocol</th>
+                <th>Endpoint</th>
+                <th>Unit ID</th>
+                <th>Tags</th>
+                <th>Save interval</th>
+                <th>Latency</th>
+                <th>Status</th>
+                <th className="actions-heading">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={11}>
+                    <div className="table-empty-message">
+                      {connected
+                        ? query
+                          ? "No configured devices match this search."
+                          : "No devices are configured."
+                        : "Collector unavailable. Configured devices could not be loaded."}
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+              {filtered.map((device) => (
+                <tr key={device.id}>
+                  <td className="table-primary">{device.name}</td>
+                  <td>{device.category ?? "Unassigned"}</td>
+                  <td>{device.group ?? "Unassigned"}</td>
+                  <td>{device.protocol}</td>
+                  <td className="mono">{device.endpoint}</td>
+                  <td className="mono">{device.unitId}</td>
+                  <td>{device.tags}</td>
+                  <td>
+                    {apiItems.find((item) => item.id === device.id)
+                      ?.saveIntervalMs
+                      ? formatSaveInterval(
+                          apiItems.find((item) => item.id === device.id)
+                            ?.saveIntervalMs ?? 1000,
+                        )
+                      : "—"}
+                  </td>
+                  <td>{device.latency ? `${device.latency} ms` : "—"}</td>
+                  <td>
+                    <StatusPill status={device.status}>
+                      {device.status}
+                    </StatusPill>
+                  </td>
+                  <td>
+                    <div className="row-actions">
+                      <button
+                        aria-label={`Open tags for ${device.name}`}
+                        className="icon-button compact"
+                        disabled={!connected}
+                        onClick={() => onManageTags(device.id)}
+                        title="View and configure device tags"
+                        type="button"
+                      >
+                        <Tags size={13} />
+                      </button>
+                      <button
+                        aria-label={`Edit ${device.name}`}
+                        className="icon-button compact"
+                        disabled={!connected || !canManage}
+                        onClick={() => openEditDevice(device.id)}
+                        title={
+                          canManage
+                            ? "Edit device"
+                            : "Administrator access is required to edit devices"
+                        }
+                        type="button"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        aria-label={`Delete ${device.name}`}
+                        className="icon-button compact danger"
+                        disabled={
+                          !connected || !canManage || deletingId === device.id
+                        }
+                        onClick={() => void removeDevice(device)}
+                        title={
+                          canManage
+                            ? "Delete device"
+                            : "Administrator access is required to delete devices"
+                        }
+                        type="button"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AddDevicePanel({
+  canManageSettings,
+  connected,
+  device,
+  onCancel,
+  onOpenClassificationSettings,
+  onSaved,
+  onOpenPostgresSettings,
+  token,
+}: {
+  canManageSettings: boolean;
+  connected: boolean;
+  device?: ApiDevice;
+  onCancel: () => void;
+  onOpenClassificationSettings: () => void;
+  onSaved: (result?: {
+    keepOpen?: boolean;
+    device?: ApiDevice;
+    message?: string;
+  }) => Promise<void>;
+  onOpenPostgresSettings: () => void;
+  token?: string;
+}) {
+  const initialTableNames = deviceHistorianTableNames(device?.name ?? "");
+  const [deviceName, setDeviceName] = useState(device?.name ?? "");
+  const [protocol, setProtocol] = useState<"tcp" | "rtu">(
+    device?.protocol ?? "tcp",
+  );
+  const [categoryId, setCategoryId] = useState(device?.categoryId ?? "");
+  const [groupId, setGroupId] = useState(device?.groupId ?? "");
+  const [postgresEnabled, setPostgresEnabled] = useState(
+    device?.postgresEnabled ?? false,
+  );
+  const [postgresDownsampleEnabled, setPostgresDownsampleEnabled] = useState(
+    device?.postgresDownsampleEnabled ?? true,
+  );
+  const [postgresDefaults, setPostgresDefaults] = useState(
+    defaultPostgresSettings,
+  );
+  const [classifications, setClassifications] =
+    useState<ApiDeviceClassifications>(emptyDeviceClassifications);
+  const [classificationsLoading, setClassificationsLoading] =
+    useState(connected);
+  const [classificationError, setClassificationError] = useState("");
+  const [postgresRawTable, setPostgresRawTable] = useState(
+    device?.postgresRawTable ?? initialTableNames.raw,
+  );
+  const [postgresDownsampleTable, setPostgresDownsampleTable] = useState(
+    device?.postgresDownsampleTable ?? initialTableNames.downsample,
+  );
+  const [rawTableEdited, setRawTableEdited] = useState(Boolean(device));
+  const [downsampleTableEdited, setDownsampleTableEdited] = useState(
+    Boolean(device),
+  );
+  const [postgresDownsampleIntervalSec, setPostgresDownsampleIntervalSec] =
+    useState(device?.postgresDownsampleIntervalSec ?? 60);
+  const [postgresRawRetentionDays, setPostgresRawRetentionDays] = useState(
+    device?.postgresRawRetentionDays ?? 30,
+  );
+  const [postgresDownsampleRetentionDays, setPostgresDownsampleRetentionDays] =
+    useState(device?.postgresDownsampleRetentionDays ?? 365);
+  const [
+    postgresMaintenanceIntervalHours,
+    setPostgresMaintenanceIntervalHours,
+  ] = useState(device?.postgresMaintenanceIntervalHours ?? 24);
+  const [postgresAction, setPostgresAction] = useState<
+    "connect" | "disconnect" | ""
+  >("");
+  const [postgresActionResult, setPostgresActionResult] = useState<{
+    status: "success" | "error";
+    message: string;
+    schema?: DevicePostgresConnectionResult["schema"];
+  } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    fetchDeviceClassifications(token)
+      .then((response) => {
+        if (!active) return;
+        setClassifications(response);
+        setClassificationError("");
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setClassificationError(
+          requestError instanceof ApiError
+            ? requestError.message
+            : "Categories and groups could not be loaded.",
+        );
+      })
+      .finally(() => {
+        if (active) setClassificationsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [connected, token]);
+
+  useEffect(() => {
+    if (!connected || !canManageSettings) return;
+    let active = true;
+    fetchPostgresSettings(token)
+      .then((response) => {
+        if (!active) return;
+        setPostgresDefaults(response);
+        if (!device) {
+          setPostgresDownsampleEnabled(response.autoDownsampleEnabled);
+          setPostgresDownsampleIntervalSec(
+            response.defaultDownsampleIntervalSec,
+          );
+          setPostgresRawRetentionDays(response.rawRetentionDays);
+          setPostgresDownsampleRetentionDays(response.downsampleRetentionDays);
+          setPostgresMaintenanceIntervalHours(
+            response.maintenanceIntervalHours,
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [canManageSettings, connected, device, token]);
+
+  async function changePostgresConnection(action: "connect" | "disconnect") {
+    if (!device || postgresAction) return;
+    setPostgresAction(action);
+    setPostgresActionResult(null);
+    setError("");
+    try {
+      const result =
+        action === "connect"
+          ? await connectDevicePostgres(device.id, token)
+          : await disconnectDevicePostgres(device.id, token);
+      setPostgresEnabled(result.connected);
+      setPostgresActionResult({
+        status:
+          result.connected || action === "disconnect" ? "success" : "error",
+        message: result.message,
+        schema: result.schema,
+      });
+      await onSaved({
+        keepOpen: true,
+        device: result.device,
+        message: result.message,
+      });
+    } catch (requestError) {
+      setPostgresActionResult({
+        status: "error",
+        message:
+          requestError instanceof ApiError
+            ? requestError.message
+            : action === "connect"
+              ? "PostgreSQL could not be connected or repaired."
+              : "PostgreSQL saving could not be paused.",
+      });
+    } finally {
+      setPostgresAction("");
+    }
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!connected) {
+      setError("Start the collector service before adding a device.");
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const saveIntervalSecondsValue = Number(form.get("saveIntervalSeconds"));
+    const saveIntervalMs = Math.round(saveIntervalSecondsValue * 1000);
+    const pollIntervalMs = Number(form.get("pollIntervalMs"));
+    if (
+      !Number.isFinite(saveIntervalSecondsValue) ||
+      saveIntervalSecondsValue < 0.1
+    ) {
+      setError("Database save interval must be at least 0.1 seconds.");
+      return;
+    }
+    if (saveIntervalMs < pollIntervalMs) {
+      setError(
+        "Database save interval must be equal to or longer than the polling interval.",
+      );
+      return;
+    }
+    if (
+      canManageSettings &&
+      (postgresEnabled || Boolean(device)) &&
+      postgresDownsampleEnabled &&
+      postgresDownsampleIntervalSec * 1000 < saveIntervalMs
+    ) {
+      setError(
+        "Downsample interval must be equal to or longer than the database save interval.",
+      );
+      return;
+    }
+    const common = {
+      name: deviceName.trim(),
+      categoryId: categoryId || null,
+      groupId: groupId || null,
+      unitId: Number(form.get("unitId")),
+      pollIntervalMs,
+      saveIntervalMs,
+      readBlockSize: Number(form.get("readBlockSize")),
+      timeoutMs: Number(form.get("timeoutMs")),
+      retries: Number(form.get("retries")),
+      postgresEnabled: canManageSettings ? postgresEnabled : false,
+      postgresDownsampleEnabled,
+      postgresRawTable,
+      postgresDownsampleTable,
+      postgresDownsampleIntervalSec,
+      postgresRawRetentionDays,
+      postgresDownsampleRetentionDays,
+      postgresMaintenanceIntervalHours,
+      enabled: device?.enabled ?? true,
+    };
+    const payload: CreateDevicePayload =
+      protocol === "tcp"
+        ? {
+            ...common,
+            protocol: "tcp",
+            tcpHost: String(form.get("tcpHost")),
+            tcpPort: Number(form.get("tcpPort")),
+          }
+        : {
+            ...common,
+            protocol: "rtu",
+            serialPort: String(form.get("serialPort")),
+            baudRate: Number(form.get("baudRate")),
+            parity:
+              device?.protocol === "rtu" ? (device.parity ?? "none") : "none",
+            dataBits: device?.protocol === "rtu" ? (device.dataBits ?? 8) : 8,
+            stopBits: device?.protocol === "rtu" ? (device.stopBits ?? 1) : 1,
+          };
+    setSubmitting(true);
+    setError("");
+    try {
+      if (device) {
+        await updateApiDevice(device.id, payload, token);
+      } else {
+        await createApiDevice(payload, token);
+      }
+      await onSaved();
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "The device could not be saved. Check the fields and try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const postgresFieldsEnabled =
+    canManageSettings && (Boolean(device) || postgresEnabled);
+
+  return (
+    <section className="panel add-device-panel">
+      <div className="panel-header">
+        <div className="panel-title">
+          <h3>{device ? `Edit ${device.name}` : "Add Modbus device"}</h3>
+          <p>
+            {device
+              ? "Saving reloads this device without restarting the application."
+              : "Polling begins as soon as the configuration is saved."}
+          </p>
+        </div>
+        <button
+          aria-label="Close device form"
+          className="icon-button"
+          onClick={onCancel}
+          type="button"
+        >
+          <X size={15} />
+        </button>
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        <div className="form-group">
+          <label htmlFor="device-name">Device name</label>
+          <input
+            className="form-control"
+            id="device-name"
+            name="name"
+            placeholder="Main energy meter"
+            required
+            onChange={(event) => {
+              const nextName = event.target.value;
+              const names = deviceHistorianTableNames(nextName);
+              setDeviceName(nextName);
+              if (!rawTableEdited) setPostgresRawTable(names.raw);
+              if (!downsampleTableEdited) {
+                setPostgresDownsampleTable(names.downsample);
+              }
+            }}
+            value={deviceName}
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="device-protocol">Protocol</label>
+          <select
+            className="form-control"
+            id="device-protocol"
+            onChange={(event) =>
+              setProtocol(event.target.value as "tcp" | "rtu")
+            }
+            value={protocol}
+          >
+            <option value="tcp">Modbus TCP</option>
+            <option value="rtu">Modbus RTU</option>
+          </select>
+        </div>
+        <div className="form-group full">
+          <div className="section-divider">
+            <FileChartColumn size={15} />
+            <div>
+              <strong>Report classification</strong>
+              <span>
+                Optional category and group choices make device reports easy to
+                filter.
+              </span>
+            </div>
+            <button
+              className="button secondary"
+              disabled={!canManageSettings}
+              onClick={onOpenClassificationSettings}
+              title={
+                canManageSettings
+                  ? "Manage report classifications"
+                  : "Administrator access is required to manage choices"
+              }
+              type="button"
+            >
+              <Settings size={13} />
+              Manage choices
+            </button>
+          </div>
+        </div>
+        <div className="form-group">
+          <label htmlFor="device-category">Category</label>
+          <select
+            aria-describedby="device-classification-help"
+            className="form-control"
+            disabled={classificationsLoading}
+            id="device-category"
+            name="categoryId"
+            onChange={(event) => setCategoryId(event.target.value)}
+            value={categoryId}
+          >
+            <option value="">
+              {classificationsLoading
+                ? "Loading categories…"
+                : classifications.categories.length > 0
+                  ? "No category"
+                  : "No categories configured"}
+            </option>
+            {device?.categoryId &&
+            !classifications.categories.some(
+              (item) => item.id === device.categoryId,
+            ) ? (
+              <option value={device.categoryId}>
+                {device.categoryName ?? "Current category"}
+              </option>
+            ) : null}
+            {classifications.categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label htmlFor="device-group">Group</label>
+          <select
+            aria-describedby="device-classification-help"
+            className="form-control"
+            disabled={classificationsLoading}
+            id="device-group"
+            name="groupId"
+            onChange={(event) => setGroupId(event.target.value)}
+            value={groupId}
+          >
+            <option value="">
+              {classificationsLoading
+                ? "Loading groups…"
+                : classifications.groups.length > 0
+                  ? "No group"
+                  : "No groups configured"}
+            </option>
+            {device?.groupId &&
+            !classifications.groups.some(
+              (item) => item.id === device.groupId,
+            ) ? (
+              <option value={device.groupId}>
+                {device.groupName ?? "Current group"}
+              </option>
+            ) : null}
+            {classifications.groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p
+          className={`form-help form-group full${
+            classificationError ? " classification-load-error" : ""
+          }`}
+          id="device-classification-help"
+          role={classificationError ? "status" : undefined}
+        >
+          {classificationError ||
+            "Choose predefined values now, or leave both fields unassigned."}
+        </p>
+        {protocol === "tcp" ? (
+          <>
+            <div className="form-group">
+              <label htmlFor="tcp-host">IP address or hostname</label>
+              <input
+                className="form-control mono"
+                id="tcp-host"
+                name="tcpHost"
+                placeholder="192.168.10.21"
+                required
+                defaultValue={device?.tcpHost ?? undefined}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="tcp-port">TCP port</label>
+              <input
+                className="form-control"
+                defaultValue={device?.tcpPort ?? 502}
+                id="tcp-port"
+                max="65535"
+                min="1"
+                name="tcpPort"
+                required
+                type="number"
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="form-group">
+              <label htmlFor="serial-port">Serial port</label>
+              <input
+                className="form-control mono"
+                id="serial-port"
+                name="serialPort"
+                placeholder="COM3 or /dev/ttyUSB0"
+                required
+                defaultValue={device?.serialPort ?? undefined}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="baud-rate">Baud rate</label>
+              <select
+                className="form-control"
+                defaultValue={device?.baudRate ?? 9600}
+                id="baud-rate"
+                name="baudRate"
+              >
+                <option value="9600">9600</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+                <option value="115200">115200</option>
+              </select>
+            </div>
+          </>
+        )}
+        <div className="form-group">
+          <label htmlFor="unit-id">Unit ID</label>
+          <input
+            className="form-control"
+            defaultValue={device?.unitId ?? 1}
+            id="unit-id"
+            max="255"
+            min="0"
+            name="unitId"
+            required
+            type="number"
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="poll-rate">Polling interval (ms)</label>
+          <input
+            className="form-control"
+            defaultValue={device?.pollIntervalMs ?? 1000}
+            id="poll-rate"
+            min="100"
+            name="pollIntervalMs"
+            required
+            type="number"
+          />
+          <p className="form-help">
+            Controls how often live values are refreshed from the device.
+          </p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="save-rate">Database save interval (seconds)</label>
+          <input
+            className="form-control"
+            defaultValue={saveIntervalSeconds(device?.saveIntervalMs ?? 1000)}
+            id="save-rate"
+            max="86400"
+            min="0.1"
+            name="saveIntervalSeconds"
+            required
+            step="0.001"
+            type="number"
+          />
+          <p className="form-help">
+            Set 1 for one remote row per second, or 0.1 for up to ten rows per
+            second. Polling must be at least as fast; a timeout or offline
+            device can leave an interval empty.
+          </p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="read-block-size">Read block size (registers)</label>
+          <input
+            className="form-control"
+            defaultValue={device?.readBlockSize ?? 120}
+            id="read-block-size"
+            max="125"
+            min="1"
+            name="readBlockSize"
+            required
+            type="number"
+          />
+          <p className="form-help">
+            Requests are split automatically and cannot exceed 125 registers; do
+            not enter 1000. Use 60–125 for dense maps, or smaller blocks when a
+            gateway rejects unsupported address gaps. Large devices cannot
+            refresh faster than one complete read cycle.
+          </p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="device-timeout">Response timeout (ms)</label>
+          <input
+            className="form-control"
+            defaultValue={device?.timeoutMs ?? 2000}
+            id="device-timeout"
+            min="100"
+            name="timeoutMs"
+            required
+            type="number"
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="device-retries">Retries</label>
+          <input
+            className="form-control"
+            defaultValue={device?.retries ?? 2}
+            id="device-retries"
+            max="10"
+            min="0"
+            name="retries"
+            required
+            type="number"
+          />
+        </div>
+        {!canManageSettings ? (
+          <div className="form-group full settings-information">
+            <ShieldCheck size={16} />
+            <div>
+              <strong>Historian setup is administrator-managed</strong>
+              <p>
+                This device will be created with remote PostgreSQL saving
+                paused. An administrator can apply the configured historian
+                defaults later from Device edit.
+              </p>
+            </div>
+          </div>
+        ) : null}
+        <fieldset
+          className="device-historian-fieldset form-grid"
+          disabled={!canManageSettings}
+        >
+          <legend className="sr-only">PostgreSQL historian</legend>
+        <div className="form-group full postgres-heading">
+          <div className="section-divider">
+            <Database size={15} />
+            <div>
+              <strong>PostgreSQL historian</strong>
+              <span>
+                {postgresDefaults.configured
+                  ? "Remote server ready · device overrides are optional"
+                  : "Configure the remote server before enabling this device"}
+              </span>
+            </div>
+            <div className="button-row">
+              <button
+                className="button secondary"
+                disabled={!canManageSettings}
+                onClick={onOpenPostgresSettings}
+                title={
+                  canManageSettings
+                    ? "Open remote PostgreSQL settings"
+                    : "Administrator access is required for remote settings"
+                }
+                type="button"
+              >
+                <Settings size={13} />
+                Remote settings
+              </button>
+              {device ? (
+                <StatusPill status={postgresEnabled ? "online" : "offline"}>
+                  {postgresEnabled ? "saving active" : "saving paused"}
+                </StatusPill>
+              ) : (
+                <label className="switch-label" htmlFor="postgres-enabled">
+                  <input
+                    checked={postgresEnabled}
+                    id="postgres-enabled"
+                    onChange={(event) =>
+                      setPostgresEnabled(event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  Enable
+                </label>
+              )}
+            </div>
+          </div>
+        </div>
+        {device ? (
+          <div
+            className={`form-group full device-postgres-connection ${
+              postgresEnabled ? "connected" : "disconnected"
+            }`}
+          >
+            <div className="device-postgres-connection-copy">
+              <strong>
+                {postgresEnabled
+                  ? "Remote database saving is active"
+                  : "Remote database saving is temporarily paused"}
+              </strong>
+              <span>
+                {postgresEnabled
+                  ? "Verify & repair checks that both tables and every tag column still exist. It uses the last saved database settings, so save any edits below first."
+                  : "The configuration below is preserved. Connect & verify repairs missing tables and columns using the last saved settings, so save any edits below first."}
+              </span>
+            </div>
+            <div className="button-row device-postgres-actions">
+              <button
+                className={`button ${
+                  postgresEnabled ? "secondary" : "primary"
+                }`}
+                disabled={Boolean(postgresAction) || submitting}
+                onClick={() => void changePostgresConnection("connect")}
+                type="button"
+              >
+                <RefreshCw size={13} />
+                {postgresAction === "connect"
+                  ? postgresEnabled
+                    ? "Verifying…"
+                    : "Connecting…"
+                  : postgresEnabled
+                    ? "Verify & repair tables"
+                    : "Connect & verify tables"}
+              </button>
+              {postgresEnabled ? (
+                <button
+                  className="button secondary"
+                  disabled={Boolean(postgresAction) || submitting}
+                  onClick={() => void changePostgresConnection("disconnect")}
+                  type="button"
+                >
+                  <Cable size={13} />
+                  {postgresAction === "disconnect"
+                    ? "Disconnecting…"
+                    : "Disconnect database"}
+                </button>
+              ) : null}
+            </div>
+            {postgresActionResult ? (
+              <p
+                className={`device-postgres-feedback ${postgresActionResult.status}`}
+                role={
+                  postgresActionResult.status === "error" ? "alert" : "status"
+                }
+              >
+                {postgresActionResult.message}
+                {postgresActionResult.schema &&
+                (postgresActionResult.schema.addedColumns.length > 0 ||
+                  postgresActionResult.schema.changedColumns.length > 0) ? (
+                  <span>
+                    {" "}
+                    {postgresActionResult.schema.addedColumns.length} column
+                    {postgresActionResult.schema.addedColumns.length === 1
+                      ? ""
+                      : "s"}{" "}
+                    added and{" "}
+                    {postgresActionResult.schema.changedColumns.length}{" "}
+                    repaired.
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="form-group">
+          <label htmlFor="raw-table">Raw data table</label>
+          <input
+            className="form-control mono"
+            disabled={!postgresFieldsEnabled}
+            id="raw-table"
+            name="postgresRawTable"
+            onChange={(event) => {
+              setRawTableEdited(true);
+              setPostgresRawTable(event.target.value);
+            }}
+            pattern="[a-z][a-z0-9_]{0,62}"
+            required
+            value={postgresRawTable}
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="downsample-table">Downsample table</label>
+          <input
+            className="form-control mono"
+            disabled={!postgresFieldsEnabled}
+            id="downsample-table"
+            name="postgresDownsampleTable"
+            onChange={(event) => {
+              setDownsampleTableEdited(true);
+              setPostgresDownsampleTable(event.target.value);
+            }}
+            pattern="[a-z][a-z0-9_]{0,62}"
+            required
+            value={postgresDownsampleTable}
+          />
+          <p className="form-help">
+            Table names are unique to this device so every tag can be a column.
+          </p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="downsample-interval">Downsample interval</label>
+          <select
+            className="form-control"
+            disabled={!postgresFieldsEnabled}
+            id="downsample-interval"
+            name="postgresDownsampleIntervalSec"
+            onChange={(event) =>
+              setPostgresDownsampleIntervalSec(Number(event.target.value))
+            }
+            value={postgresDownsampleIntervalSec}
+          >
+            <option value="10">10 seconds</option>
+            <option value="60">1 minute</option>
+            <option value="300">5 minutes</option>
+            <option value="900">15 minutes</option>
+            <option value="3600">1 hour</option>
+            <option value="86400">1 day</option>
+          </select>
+          <p className="form-help">
+            Saves the last good value for each tag in one wide timestamp row.
+            For example, 15 minutes creates one row per 15-minute interval.
+          </p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="device-downsampling">Automatic downsampling</label>
+          <label className="setting-toggle-card" htmlFor="device-downsampling">
+            <input
+              checked={postgresDownsampleEnabled}
+              disabled={!postgresFieldsEnabled}
+              id="device-downsampling"
+              onChange={(event) =>
+                setPostgresDownsampleEnabled(event.target.checked)
+              }
+              type="checkbox"
+            />
+            <span>
+              <strong>
+                {postgresDownsampleEnabled ? "Enabled" : "Disabled"}
+              </strong>
+              <small>
+                Store the last good tag value from each selected interval.
+              </small>
+            </span>
+          </label>
+        </div>
+        <div className="form-group">
+          <label htmlFor="raw-retention">Raw data retention (days)</label>
+          <input
+            className="form-control"
+            disabled={!postgresFieldsEnabled}
+            id="raw-retention"
+            max="36500"
+            min="0"
+            onChange={(event) =>
+              setPostgresRawRetentionDays(Number(event.target.value))
+            }
+            type="number"
+            value={postgresRawRetentionDays}
+          />
+          <p className="form-help">Use 0 to keep raw rows indefinitely.</p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="downsample-retention">
+            Downsample retention (days)
+          </label>
+          <input
+            className="form-control"
+            disabled={!postgresFieldsEnabled}
+            id="downsample-retention"
+            max="36500"
+            min="0"
+            onChange={(event) =>
+              setPostgresDownsampleRetentionDays(Number(event.target.value))
+            }
+            type="number"
+            value={postgresDownsampleRetentionDays}
+          />
+          <p className="form-help">Use 0 to keep summary rows indefinitely.</p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="device-cleanup-frequency">Cleanup frequency</label>
+          <select
+            className="form-control"
+            disabled={!postgresFieldsEnabled}
+            id="device-cleanup-frequency"
+            onChange={(event) =>
+              setPostgresMaintenanceIntervalHours(Number(event.target.value))
+            }
+            value={postgresMaintenanceIntervalHours}
+          >
+            <option value="1">Every hour</option>
+            <option value="6">Every 6 hours</option>
+            <option value="12">Every 12 hours</option>
+            <option value="24">Once per day</option>
+            <option value="48">Every 2 days</option>
+            <option value="168">Once per week</option>
+          </select>
+        </div>
+        <div className="form-group full">
+          <label>PostgreSQL connection</label>
+          <p className="form-help postgres-note">
+            Every device has its own table names, automatic downsampling, and
+            retention policy. The password stays encrypted in the collector; use
+            Data connections → Historian to change the server.
+          </p>
+        </div>
+        </fieldset>
+        {error ? (
+          <p className="login-error form-group full" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div className="button-row form-group full form-actions">
+          <button className="button secondary" onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button
+            className="button primary"
+            disabled={submitting}
+            type="submit"
+          >
+            {device ? <Save size={14} /> : <Plus size={14} />}
+            {submitting ? "Saving…" : device ? "Save device" : "Add device"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function mapApiReading(reading: ApiReading): LiveTag {
+  const hasReading = reading.hasReading === 1;
+  return {
+    registerId: reading.registerId,
+    tag: reading.tagName,
+    device: reading.deviceName,
+    address: `R ${reading.address}`,
+    value:
+      !hasReading || reading.value === null
+        ? "—"
+        : `${Number(reading.value.toFixed(4))} ${reading.unit}`.trim(),
+    quality: !hasReading
+      ? "Waiting"
+      : reading.quality === "good"
+        ? "Good"
+        : reading.quality === "stale"
+          ? "Stale"
+          : "Bad",
+    updated: hasReading
+      ? new Date(reading.timestamp).toLocaleTimeString()
+      : "—",
+  };
+}
+
+function LiveDataView({
+  connected,
+  onManageTags,
+  token,
+}: {
+  connected: boolean;
+  onManageTags: (deviceId?: string) => void;
+  token?: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [items, setItems] = useState<LiveTag[]>([]);
+  const [deviceItems, setDeviceItems] = useState<ApiDevice[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [reportedTotal, setReportedTotal] = useState(0);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    fetchDevices(token)
+      .then((response) => {
+        if (!active) return;
+        setDeviceItems(response);
+        setSelectedDeviceId((current) => current || response[0]?.id || "");
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [connected, token]);
+
+  useEffect(() => {
+    if (!connected || !selectedDeviceId) return;
+    let active = true;
+    let refreshTimer: number | undefined;
+    let requestController: AbortController | null = null;
+    const refresh = async () => {
+      const controller = new AbortController();
+      requestController = controller;
+      try {
+        const response = await fetchDeviceReadings(
+          selectedDeviceId,
+          token,
+          controller.signal,
+        );
+        if (active && requestController === controller) {
+          setItems(response.items.map(mapApiReading));
+          setReportedTotal(response.total);
+        }
+      } catch (requestError) {
+        if (
+          !(requestError instanceof DOMException) ||
+          requestError.name !== "AbortError"
+        ) {
+          // The connection indicator already communicates collector state.
+        }
+      } finally {
+        if (requestController === controller) requestController = null;
+        if (active) {
+          refreshTimer = window.setTimeout(() => void refresh(), 2000);
+        }
+      }
+    };
+    void refresh();
+    return () => {
+      active = false;
+      requestController?.abort();
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+    };
+  }, [connected, selectedDeviceId, token]);
+
+  const choices = deviceItems.map((device) => ({
+    id: device.id,
+    name: device.name,
+    status: device.status === "disabled" ? "offline" : device.status,
+    meta:
+      device.protocol === "tcp"
+        ? `${device.tcpHost}:${device.tcpPort}`
+        : `${device.serialPort} · ${device.baudRate}`,
+  }));
+  const effectiveDeviceId = selectedDeviceId;
+  const selectedChoice = choices.find(
+    (device) => device.id === effectiveDeviceId,
+  );
+  const displayedItems = items;
+
+  const filtered = displayedItems.filter((item) =>
+    `${item.tag} ${item.device} ${item.address}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / liveDataPageSize));
+  const activePage = Math.min(page, pageCount);
+  const pageStart = (activePage - 1) * liveDataPageSize;
+  const pageItems = filtered.slice(pageStart, pageStart + liveDataPageSize);
+  const selectedDeviceTotal = Math.max(reportedTotal, displayedItems.length);
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Real-time monitoring"
+        title="Live data"
+        copy="Values refresh on the configured polling interval. Quality changes immediately when a device stops responding."
+      >
+        <span className="connection-pill">
+          <span className="pulse-dot" />
+          {connected ? "Refreshing · 2 s" : "Collector unavailable"}
+        </span>
+      </SectionIntro>
+      <div className="live-layout">
+        <aside className="panel device-selector">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Devices</h3>
+              <p>Select one to view its tags</p>
+            </div>
+          </div>
+          <div className="device-choice-list">
+            {choices.map((device) => (
+              <button
+                className={`device-choice${
+                  effectiveDeviceId === device.id ? " selected" : ""
+                }`}
+                key={device.id}
+                onClick={() => {
+                  setItems([]);
+                  setReportedTotal(0);
+                  setPage(1);
+                  setSelectedDeviceId(device.id);
+                }}
+                type="button"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`device-status-dot ${device.status}`}
+                />
+                <span>
+                  <strong>{device.name}</strong>
+                  <small>{device.meta}</small>
+                </span>
+              </button>
+            ))}
+            {choices.length === 0 ? (
+              <div className="device-choice-empty">
+                <Network size={18} />
+                <p>
+                  {connected ? "No devices configured" : "Collector unavailable"}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </aside>
+
+        <section className="panel table-panel">
+          <div className="table-toolbar">
+            <div>
+              <p className="eyebrow">Selected device</p>
+              <strong className="selected-device-name">
+                {selectedChoice?.name ?? "Choose a device"}
+              </strong>
+            </div>
+            <div className="button-row">
+              <div className="search-field">
+                <Search size={14} />
+                <input
+                  aria-label="Search selected device tags"
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="Search tag or address"
+                  value={query}
+                />
+              </div>
+              <button
+                className="button secondary"
+                onClick={() => onManageTags(effectiveDeviceId)}
+                type="button"
+              >
+                <Tags size={13} />
+                Manage tags
+              </button>
+            </div>
+          </div>
+          {filtered.length > 0 ? (
+            <div className="live-data-results">
+              <div className="data-table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Tag</th>
+                      <th>Register</th>
+                      <th>Value</th>
+                      <th>Quality</th>
+                      <th>Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageItems.map((item) => (
+                      <tr key={item.registerId}>
+                        <td className="table-primary">{item.tag}</td>
+                        <td className="mono">{item.address}</td>
+                        <td className="value-reading">{item.value}</td>
+                        <td>
+                          <StatusPill
+                            status={
+                              item.quality === "Good"
+                                ? "online"
+                                : item.quality === "Stale"
+                                  ? "warning"
+                                  : item.quality === "Waiting"
+                                    ? "waiting"
+                                    : "offline"
+                            }
+                          >
+                            {item.quality}
+                          </StatusPill>
+                        </td>
+                        <td>{item.updated}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div
+                aria-label="Live data pagination"
+                className="table-pagination"
+              >
+                <p>
+                  Showing {pageStart + 1}–
+                  {Math.min(pageStart + liveDataPageSize, filtered.length)} of{" "}
+                  {formatInteger(query ? filtered.length : selectedDeviceTotal)}{" "}
+                  {query ? "matching tags" : "tags"}
+                  {query
+                    ? ` · ${formatInteger(selectedDeviceTotal)} total`
+                    : ""}
+                </p>
+                <div className="button-row">
+                  <button
+                    className="button secondary"
+                    disabled={activePage === 1}
+                    onClick={() => setPage(Math.max(1, activePage - 1))}
+                    type="button"
+                  >
+                    Previous
+                  </button>
+                  <span aria-live="polite" className="pagination-status">
+                    Page {activePage} of {pageCount}
+                  </span>
+                  <button
+                    className="button secondary"
+                    disabled={activePage === pageCount}
+                    onClick={() => setPage(Math.min(pageCount, activePage + 1))}
+                    type="button"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <div>
+                <span className="empty-state-icon">
+                  <Tags size={21} />
+                </span>
+                <h3>
+                  {!connected
+                    ? "Collector unavailable"
+                    : selectedChoice
+                      ? "No live tags for this device"
+                      : "Choose a configured device"}
+                </h3>
+                <p>
+                  {!connected
+                    ? "Start the collector to load configured devices and live values."
+                    : selectedChoice
+                      ? "Add at least one enabled tag, then values will appear after the next successful poll."
+                      : "Select a device from the list to load all of its tags."}
+                </p>
+                {connected ? (
+                  <button
+                    className="button primary"
+                    onClick={() => onManageTags(effectiveDeviceId)}
+                    type="button"
+                  >
+                    <Plus size={14} />
+                    Add tag
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+    </>
+  );
+}
+
+function TagsView({
+  canConfigure,
+  connected,
+  initialDeviceId,
+  onToast,
+  token,
+}: {
+  canConfigure: boolean;
+  connected: boolean;
+  initialDeviceId?: string;
+  onToast: (text: string) => void;
+  token?: string;
+}) {
+  const [deviceItems, setDeviceItems] = useState<ApiDevice[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [registers, setRegisters] = useState<ApiRegister[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingRegister, setEditingRegister] = useState<ApiRegister | null>(
+    null,
+  );
+  const [tagName, setTagName] = useState("");
+  const [historianColumn, setHistorianColumn] = useState("");
+  const [historianColumnEdited, setHistorianColumnEdited] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
+  const [historianTimezone, setHistorianTimezone] = useState("UTC");
+  const [error, setError] = useState("");
+  const [csvError, setCsvError] = useState("");
+  const [importingCsv, setImportingCsv] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [syncingSchema, setSyncingSchema] = useState(false);
+  const [schemaDirtyDeviceIds, setSchemaDirtyDeviceIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const tagCsvInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    fetchDevices(token)
+      .then((response) => {
+        if (!active) return;
+        setDeviceItems(response);
+        setSelectedDeviceId((current) => {
+          if (current) return current;
+          if (
+            initialDeviceId &&
+            response.some((device) => device.id === initialDeviceId)
+          ) {
+            return initialDeviceId;
+          }
+          return response[0]?.id || "";
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [connected, initialDeviceId, token]);
+
+  useEffect(() => {
+    if (!connected || !canConfigure) return;
+    let active = true;
+    fetchPostgresSettings(token)
+      .then((response) => {
+        if (active) setHistorianTimezone(response.historianTimezone);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [canConfigure, connected, token]);
+
+  async function loadTags(deviceId: string) {
+    if (!deviceId) {
+      setRegisters([]);
+      return;
+    }
+    try {
+      setRegisters(await fetchRegisters(deviceId, token));
+    } catch {
+      onToast("Could not load tags");
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+    let active = true;
+    fetchRegisters(selectedDeviceId, token)
+      .then((response) => {
+        if (active) setRegisters(response);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [selectedDeviceId, token]);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedDeviceId) {
+      setError("Select a device before adding a tag.");
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    setSubmitting(true);
+    setError("");
+    const payload: CreateRegisterPayload = {
+      name: String(form.get("name")).trim(),
+      historianColumn: normalizeHistorianColumn(
+        String(form.get("historianColumn")),
+      ),
+      address: Number(form.get("address")),
+      functionCode: Number(form.get("functionCode")) as 1 | 2 | 3 | 4,
+      dataType: String(form.get("dataType")) as ApiRegister["dataType"],
+      byteOrder: String(form.get("byteOrder")) as ApiRegister["byteOrder"],
+      scale: Number(form.get("scale")),
+      offset: Number(form.get("offset")),
+      decimalPlaces: Number(form.get("decimalPlaces")),
+      unit: String(form.get("unit")),
+      enabled: editingRegister?.enabled ?? true,
+    };
+    if (
+      editingRegister &&
+      payload.decimalPlaces < editingRegister.decimalPlaces &&
+      !window.confirm(
+        `Reduce database decimal places from ${editingRegister.decimalPlaces} to ${payload.decimalPlaces}? When you later synchronize the table, existing raw and downsample history for this tag will be permanently rounded. Back up that history first.`,
+      )
+    ) {
+      setSubmitting(false);
+      return;
+    }
+    try {
+      const savedRegister = editingRegister
+        ? await updateRegister(editingRegister.id, payload, token)
+        : await createRegister(selectedDeviceId, payload, token);
+      await loadTags(selectedDeviceId);
+      setShowForm(false);
+      setEditingRegister(null);
+      setSchemaDirtyDeviceIds((current) => {
+        const next = new Set(current);
+        next.add(selectedDeviceId);
+        return next;
+      });
+      onToast(
+        editingRegister
+          ? `Tag saved. PostgreSQL column "${savedRegister.historianColumn ?? payload.historianColumn}" is pending; click Sync table columns.`
+          : `Tag added with PostgreSQL column "${savedRegister.historianColumn ?? payload.historianColumn}". Click Sync table columns.`,
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "The tag could not be saved.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const selectedDevice = deviceItems.find(
+    (device) => device.id === selectedDeviceId,
+  );
+
+  function openNewTag() {
+    setEditingRegister(null);
+    setTagName("");
+    setHistorianColumn("");
+    setHistorianColumnEdited(false);
+    setShowForm(true);
+    setError("");
+  }
+
+  function openEditTag(register: ApiRegister) {
+    setEditingRegister(register);
+    setTagName(register.name);
+    setHistorianColumn(
+      register.historianColumn ?? normalizeHistorianColumn(register.name),
+    );
+    setHistorianColumnEdited(true);
+    setShowForm(true);
+    setError("");
+  }
+
+  async function removeTag(register: ApiRegister) {
+    if (
+      !window.confirm(
+        `Delete tag ${register.name}? New values will stop immediately. Its PostgreSQL column and saved history stay until you run Sync table columns and confirm removal.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(register.id);
+    try {
+      await deleteRegister(register.id, token);
+      if (editingRegister?.id === register.id) {
+        setEditingRegister(null);
+        setShowForm(false);
+      }
+      await loadTags(selectedDeviceId);
+      setSchemaDirtyDeviceIds((current) => {
+        const next = new Set(current);
+        next.add(selectedDeviceId);
+        return next;
+      });
+      onToast(
+        `${register.name} deleted. Click Sync table columns to update PostgreSQL.`,
+      );
+    } catch (requestError) {
+      onToast(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "The tag could not be deleted",
+      );
+    } finally {
+      setDeletingId("");
+    }
+  }
+
+  async function refreshDevicesAfterSync() {
+    const response = await fetchDevices(token);
+    setDeviceItems(response);
+  }
+
+  async function syncSelectedDeviceSchema() {
+    if (!selectedDevice || !connected) {
+      return;
+    }
+
+    setSyncingSchema(true);
+    try {
+      let result = await syncHistorianSchema(selectedDevice.id, false, token);
+      const orphanedColumns = result.orphanedColumns ?? [];
+      let fullySynced = result.ok && orphanedColumns.length === 0;
+
+      if (orphanedColumns.length > 0) {
+        const removeHistory = window.confirm(
+          `${orphanedColumns.length} old database ${
+            orphanedColumns.length === 1 ? "column is" : "columns are"
+          } no longer linked to a tag:\n\n${orphanedColumns.join(
+            ", ",
+          )}\n\nRemove ${
+            orphanedColumns.length === 1
+              ? "this column and its saved history"
+              : "these columns and their saved history"
+          }? This cannot be undone.`,
+        );
+        if (removeHistory) {
+          result = await syncHistorianSchema(
+            selectedDevice.id,
+            true,
+            token,
+            orphanedColumns,
+          );
+          fullySynced = result.ok;
+        } else {
+          onToast(
+            "Removed-tag history was kept. PostgreSQL logging remains paused until the table columns are fully synchronized.",
+          );
+        }
+      }
+
+      await refreshDevicesAfterSync();
+      if (fullySynced) {
+        setSchemaDirtyDeviceIds((current) => {
+          const next = new Set(current);
+          next.delete(selectedDevice.id);
+          return next;
+        });
+        const changedCount =
+          (result.addedColumns?.length ?? 0) +
+          (result.changedColumns?.length ?? 0) +
+          (result.droppedColumns?.length ?? 0);
+        onToast(
+          `${
+            changedCount > 0
+              ? `PostgreSQL table synchronized (${changedCount} ${
+                  changedCount === 1 ? "column change" : "column changes"
+                }).`
+              : result.message || "PostgreSQL table columns are up to date."
+          }${
+            selectedDevice.postgresEnabled
+              ? ""
+              : " Reconnect from Device edit to resume database saving."
+          }`,
+        );
+      } else if (orphanedColumns.length === 0) {
+        onToast(result.message);
+      }
+    } catch (requestError) {
+      onToast(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "The PostgreSQL table columns could not be synchronized.",
+      );
+    } finally {
+      setSyncingSchema(false);
+    }
+  }
+
+  function downloadSelectedDeviceTags() {
+    if (!selectedDevice) return;
+    const rows: Array<Array<string | number | boolean>> = [
+      [...tagCsvHeaders],
+      ...registers.map((register) => [
+        register.name,
+        register.address,
+        register.functionCode,
+        register.dataType,
+        register.byteOrder,
+        register.scale,
+        register.offset,
+        register.unit,
+        register.decimalPlaces,
+        register.enabled,
+      ]),
+    ];
+    const deviceName =
+      selectedDevice.name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "device";
+    downloadCsv(`${deviceName}-tags.csv`, rows);
+    onToast(
+      registers.length > 0
+        ? `${registers.length} tags downloaded`
+        : "Empty tag CSV template downloaded",
+    );
+  }
+
+  async function importTagCsv(file: File) {
+    if (!selectedDevice || !canConfigure || !connected) return;
+    setCsvError("");
+    if (file.size > maxTagCsvBytes) {
+      setCsvError(
+        `Tag CSV imports are limited to 2 MB and ${maxTagCsvRows} data rows. Split this file into smaller imports.`,
+      );
+      return;
+    }
+    let payloads: CreateRegisterPayload[];
+    try {
+      payloads = validateTagCsv(await file.text(), registers);
+    } catch (requestError) {
+      setCsvError(
+        requestError instanceof Error
+          ? requestError.message
+          : "The CSV file could not be read.",
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `Import ${payloads.length} ${
+          payloads.length === 1 ? "tag" : "tags"
+        } into ${selectedDevice.name}? All rows have been validated.`,
+      )
+    ) {
+      return;
+    }
+
+    setImportingCsv(true);
+    try {
+      const result = await importRegisters(selectedDevice.id, payloads, token);
+      await loadTags(selectedDevice.id);
+      setSchemaDirtyDeviceIds((current) => {
+        const next = new Set(current);
+        next.add(selectedDevice.id);
+        return next;
+      });
+      onToast(
+        `${result.count} ${
+          result.count === 1 ? "tag" : "tags"
+        } imported (${result.totalTags} total). Click Sync table columns to update PostgreSQL.`,
+      );
+    } catch (requestError) {
+      await loadTags(selectedDevice.id);
+      const reason =
+        requestError instanceof ApiError
+          ? requestError.message
+          : "The collector rejected the tag import.";
+      setCsvError(`No tags were imported. ${reason}`);
+    } finally {
+      setImportingCsv(false);
+    }
+  }
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Register configuration"
+        title="Tags"
+        copy="Add Modbus addresses and choose the exact PostgreSQL column used for every tag. Table sync remains available while database saving is paused."
+      >
+        <select
+          aria-label="Select device for tag configuration"
+          className="form-control device-select"
+          onChange={(event) => {
+            setSelectedDeviceId(event.target.value);
+            setShowForm(false);
+            setEditingRegister(null);
+            setCsvError("");
+          }}
+          value={selectedDeviceId}
+        >
+          <option value="">Select a device</option>
+          {deviceItems.map((device) => (
+            <option key={device.id} value={device.id}>
+              {device.name}
+            </option>
+          ))}
+        </select>
+        <button
+          className="button secondary"
+          disabled={!selectedDeviceId}
+          onClick={downloadSelectedDeviceTags}
+          title={
+            registers.length > 0
+              ? "Download the selected device tags as CSV"
+              : "Download a header-only CSV template"
+          }
+          type="button"
+        >
+          <Download size={14} />
+          {registers.length > 0 ? "Download CSV" : "Download template"}
+        </button>
+        <input
+          accept=".csv,text/csv"
+          className="sr-only"
+          onChange={(event) => {
+            const input = event.currentTarget;
+            const file = input.files?.[0];
+            if (file) {
+              void importTagCsv(file).finally(() => {
+                input.value = "";
+              });
+            }
+          }}
+          ref={tagCsvInputRef}
+          tabIndex={-1}
+          type="file"
+        />
+        <button
+          className="button secondary"
+          disabled={
+            !selectedDeviceId || !canConfigure || !connected || importingCsv
+          }
+          onClick={() => tagCsvInputRef.current?.click()}
+          title={
+            !canConfigure
+              ? "Administrator access is required to import tags"
+              : !connected
+                ? "Connect the collector before importing tags"
+                : "Validate and import tags from CSV"
+          }
+          type="button"
+        >
+          <Upload size={14} />
+          {importingCsv ? "Importing…" : "Upload CSV"}
+        </button>
+        <button
+          className="button secondary"
+          disabled={!selectedDeviceId || !canConfigure}
+          onClick={openNewTag}
+          title={
+            canConfigure
+              ? "Add a Modbus tag"
+              : "Administrator access is required to configure tags"
+          }
+          type="button"
+        >
+          <Plus size={14} />
+          Add tag
+        </button>
+        <button
+          className="button primary"
+          disabled={
+            !canConfigure || !connected || !selectedDevice || syncingSchema
+          }
+          onClick={() => void syncSelectedDeviceSchema()}
+          title={
+            !canConfigure
+              ? "Administrator access is required to synchronize tables"
+              : !connected
+                ? "Connect the collector before synchronizing"
+                : !selectedDevice
+                  ? "Select a device before synchronizing"
+                  : selectedDevice.postgresEnabled
+                    ? "Add, update, and review removed columns in PostgreSQL"
+                    : "Synchronize while saving is paused, then reconnect from Device edit"
+          }
+          type="button"
+        >
+          <RefreshCw
+            className={syncingSchema ? "spin-icon" : undefined}
+            size={14}
+          />
+          {syncingSchema ? "Synchronizing…" : "Sync table columns"}
+        </button>
+      </SectionIntro>
+
+      <p className="tag-csv-help">
+        <Upload size={14} />
+        Bulk CSV import accepts up to {formatInteger(maxTagCsvRows)} tags in one
+        file (maximum 2 MB). The complete file is validated before one import
+        request is sent.
+      </p>
+
+      {csvError ? (
+        <p className="login-error tag-csv-error" role="alert">
+          {csvError}
+        </p>
+      ) : null}
+
+      {showForm ? (
+        <section
+          className="panel add-device-panel"
+          key={editingRegister?.id ?? "new-tag"}
+        >
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>
+                {editingRegister
+                  ? `Edit ${editingRegister.name}`
+                  : `Add tag to ${selectedDevice?.name}`}
+              </h3>
+              <p>Addresses are zero-based Modbus offsets.</p>
+            </div>
+            <button
+              aria-label="Close tag form"
+              className="icon-button"
+              onClick={() => {
+                setShowForm(false);
+                setEditingRegister(null);
+              }}
+              type="button"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <form className="form-grid tag-form" onSubmit={submit}>
+            <div className="form-group">
+              <label htmlFor="tag-name">Tag name</label>
+              <input
+                className="form-control"
+                id="tag-name"
+                maxLength={120}
+                name="name"
+                onChange={(event) => {
+                  const nextName = event.target.value;
+                  setTagName(nextName);
+                  if (!historianColumnEdited) {
+                    setHistorianColumn(
+                      nextName.trim() ? normalizeHistorianColumn(nextName) : "",
+                    );
+                  }
+                }}
+                placeholder="L1 Voltage"
+                required
+                value={tagName}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="historian-column">PostgreSQL column</label>
+              <input
+                autoCapitalize="none"
+                autoCorrect="off"
+                className="form-control mono"
+                id="historian-column"
+                maxLength={63}
+                name="historianColumn"
+                onChange={(event) => {
+                  setHistorianColumnEdited(true);
+                  setHistorianColumn(
+                    event.target.value
+                      ? normalizeHistorianColumn(event.target.value)
+                      : "",
+                  );
+                }}
+                pattern="[a-z][a-z0-9_]{0,62}"
+                placeholder="l1_voltage"
+                required
+                spellCheck={false}
+                value={historianColumn}
+              />
+              <p className="form-help">
+                Defaults to the tag-only name: “Main KW” becomes “main_kw”. Edit
+                this field when you need a different column, save the tag, then
+                click Sync table columns.
+              </p>
+            </div>
+            <div className="form-group">
+              <label htmlFor="tag-address">Register address</label>
+              <input
+                className="form-control"
+                id="tag-address"
+                max="65535"
+                min="0"
+                name="address"
+                placeholder="0"
+                required
+                type="number"
+                defaultValue={editingRegister?.address}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="function-code">Register area</label>
+              <select
+                className="form-control"
+                defaultValue={editingRegister?.functionCode ?? 3}
+                id="function-code"
+                name="functionCode"
+              >
+                <option value="1">FC1 · Coil</option>
+                <option value="2">FC2 · Discrete input</option>
+                <option value="3">FC3 · Holding register</option>
+                <option value="4">FC4 · Input register</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label htmlFor="data-type">Data type</label>
+              <select
+                className="form-control"
+                defaultValue={editingRegister?.dataType ?? "uint16"}
+                id="data-type"
+                name="dataType"
+              >
+                <option value="bool">Boolean</option>
+                <option value="uint16">Unsigned 16-bit</option>
+                <option value="int16">Signed 16-bit</option>
+                <option value="uint32">Unsigned 32-bit</option>
+                <option value="int32">Signed 32-bit</option>
+                <option value="float32">Float 32-bit</option>
+                <option value="float64">Float 64-bit</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label htmlFor="byte-order">Byte order</label>
+              <select
+                className="form-control"
+                defaultValue={editingRegister?.byteOrder ?? "ABCD"}
+                id="byte-order"
+                name="byteOrder"
+              >
+                <option value="ABCD">ABCD · Big endian</option>
+                <option value="BADC">BADC · Byte swap</option>
+                <option value="CDAB">CDAB · Word swap</option>
+                <option value="DCBA">DCBA · Full swap</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label htmlFor="tag-unit">Engineering unit</label>
+              <input
+                className="form-control"
+                id="tag-unit"
+                maxLength={32}
+                name="unit"
+                placeholder="V, A, °C, bar…"
+                defaultValue={editingRegister?.unit}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="tag-scale">Scale</label>
+              <input
+                className="form-control"
+                defaultValue={editingRegister?.scale ?? 1}
+                id="tag-scale"
+                name="scale"
+                required
+                step="any"
+                type="number"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="tag-offset">Offset</label>
+              <input
+                className="form-control"
+                defaultValue={editingRegister?.offset ?? 0}
+                id="tag-offset"
+                name="offset"
+                required
+                step="any"
+                type="number"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="tag-decimal-places">
+                Decimal places in database
+              </label>
+              <input
+                className="form-control"
+                defaultValue={editingRegister?.decimalPlaces ?? 2}
+                id="tag-decimal-places"
+                max="10"
+                min="0"
+                name="decimalPlaces"
+                required
+                step="1"
+                type="number"
+              />
+              <p className="form-help">
+                Choose how many digits PostgreSQL keeps after the decimal point.
+                For example, 2 stores 12.35.
+              </p>
+            </div>
+            {error ? (
+              <p className="login-error form-group full" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <div className="button-row form-group full form-actions">
+              <button
+                className="button secondary"
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingRegister(null);
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="button primary"
+                disabled={submitting}
+                type="submit"
+              >
+                {editingRegister ? <Save size={14} /> : <Plus size={14} />}
+                {submitting
+                  ? "Saving…"
+                  : editingRegister
+                    ? "Save tag"
+                    : "Add tag"}
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      <section className="panel table-panel">
+        {registers.length > 0 ? (
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Tag</th>
+                  <th>PostgreSQL column</th>
+                  <th>Area</th>
+                  <th>Address</th>
+                  <th>Data type</th>
+                  <th>Byte order</th>
+                  <th>Scale</th>
+                  <th>Offset</th>
+                  <th>Decimal places</th>
+                  <th>Unit</th>
+                  <th>Status</th>
+                  <th className="actions-heading">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {registers.map((register) => (
+                  <tr key={register.id}>
+                    <td className="table-primary">{register.name}</td>
+                    <td className="mono">
+                      {register.historianColumn ??
+                        normalizeHistorianColumn(register.name)}
+                    </td>
+                    <td className="mono">FC{register.functionCode}</td>
+                    <td className="mono">{register.address}</td>
+                    <td>{register.dataType}</td>
+                    <td className="mono">{register.byteOrder}</td>
+                    <td>{register.scale}</td>
+                    <td>{register.offset}</td>
+                    <td>{register.decimalPlaces}</td>
+                    <td>{register.unit || "—"}</td>
+                    <td>
+                      <StatusPill
+                        status={register.enabled ? "online" : "offline"}
+                      >
+                        {register.enabled ? "enabled" : "disabled"}
+                      </StatusPill>
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          aria-label={`Edit ${register.name}`}
+                          className="icon-button compact"
+                          disabled={!canConfigure}
+                          onClick={() => openEditTag(register)}
+                          title="Edit tag"
+                          type="button"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          aria-label={`Delete ${register.name}`}
+                          className="icon-button compact danger"
+                          disabled={!canConfigure || deletingId === register.id}
+                          onClick={() => void removeTag(register)}
+                          title="Delete tag"
+                          type="button"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <div>
+              <span className="empty-state-icon">
+                <Tags size={21} />
+              </span>
+              <h3>
+                {selectedDeviceId
+                  ? "No tags configured"
+                  : "Select a device first"}
+              </h3>
+              <p>
+                {selectedDeviceId
+                  ? "Add the first Modbus register for this device."
+                  : "Create a device, then choose it above to manage tags."}
+              </p>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {selectedDevice ? (
+        <section className="panel historian-table-preview">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>{selectedDevice.name} database table</h3>
+              <p>
+                Exact layout: Timestamp followed by one configured column for
+                every tag · last sync{" "}
+                {formatDateTime(selectedDevice.postgresSchemaSyncedAt)}
+              </p>
+            </div>
+            <span className="table-name-chip">
+              <Table2 size={13} />
+              {selectedDevice.postgresRawTable}
+            </span>
+          </div>
+          <div
+            aria-live="polite"
+            className={`schema-sync-status ${
+              schemaDirtyDeviceIds.has(selectedDevice.id) ||
+              selectedDevice.postgresSchemaDirty
+                ? "needs-sync"
+                : "is-synced"
+            }`}
+          >
+            <RefreshCw size={15} />
+            <div>
+              <strong>
+                {schemaDirtyDeviceIds.has(selectedDevice.id) ||
+                selectedDevice.postgresSchemaDirty
+                  ? "Table columns need synchronization"
+                  : selectedDevice.postgresSchemaSyncedAt
+                    ? "Table columns synchronized"
+                    : "Table has not been synchronized yet"}
+              </strong>
+              <p>
+                Adding, updating, or removing a tag marks this table for sync.
+                Removed-tag history is deleted only after you confirm it. Sync
+                also works while saving is paused; reconnect from Device edit
+                afterward.
+              </p>
+            </div>
+          </div>
+          <div className="data-table-wrap">
+            <table className="data-table schema-preview-table">
+              <thead>
+                <tr>
+                  <th>
+                    <span className="schema-column-name">Timestamp</span>
+                    <span className="schema-column-type">TIMESTAMPTZ</span>
+                  </th>
+                  {registers.map((register) => (
+                    <th key={register.id}>
+                      <span className="schema-column-name">
+                        {register.historianColumn ?? "Pending column"}
+                      </span>
+                      <span className="schema-column-type">
+                        NUMERIC(30, {register.decimalPlaces})
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="mono">
+                    {canConfigure
+                      ? formatHistorianPreviewTimestamp(historianTimezone)
+                      : "Configured historian timezone"}
+                  </td>
+                  {registers.map((register) => (
+                    <td className="mono" key={register.id}>
+                      {formatHistorianPreviewValue(register.decimalPlaces)}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="schema-preview-note">
+            PostgreSQL receives exactly the Timestamp and tag columns shown
+            above. New columns default to the normalized tag-only name, without
+            an internal ID suffix. To rename a column, edit its tag and then
+            synchronize.{" "}
+            {canConfigure
+              ? `Timestamp uses the ${historianTimezone} timezone selected in Data connections → Historian.`
+              : "Timestamp timezone is managed by an administrator under Data connections → Historian."}
+          </p>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
+
+
+function systemAlertTypeLabel(type: ApiSystemAlert["type"]) {
+  return type === "device_offline"
+    ? "Device offline"
+    : "Remote database offline";
+}
+
+function whatsappDeliveryLabel(status: ApiSystemAlert["deliveryStatus"]) {
+  switch (status) {
+    case "sent":
+      return "WhatsApp accepted";
+    case "pending":
+      return "WhatsApp pending";
+    case "failed":
+      return "WhatsApp failed";
+    default:
+      return "WhatsApp not configured";
+  }
+}
+
+function WhatsAppAlertSettings({
+  connected,
+  onToast,
+  token,
+}: {
+  connected: boolean;
+  onToast: (text: string) => void;
+  token?: string;
+}) {
+  const [settings, setSettings] = useState(defaultWhatsAppSettings);
+  const [recipientsDraft, setRecipientsDraft] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<"save" | "test" | "">("");
+  const [error, setError] = useState("");
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    recipientCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    fetchWhatsAppAlertSettings(token)
+      .then((response) => {
+        if (!active) return;
+        setSettings(response);
+        setRecipientsDraft(response.recipients.join("\n"));
+        setError("");
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setError(
+          requestError instanceof ApiError
+            ? requestError.message
+            : "WhatsApp settings could not be loaded.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [connected, token]);
+
+  function updateSettings(patch: Partial<ApiWhatsAppSettings>) {
+    setSettings((current) => ({ ...current, ...patch }));
+  }
+
+  function recipients() {
+    return Array.from(
+      new Set(
+        recipientsDraft
+          .split(/[\n,]+/)
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  function payload(): WhatsAppSettingsPayload {
+    const tokenValue = accessToken.trim();
+    return {
+      enabled: settings.enabled,
+      graphApiVersion: settings.graphApiVersion.trim(),
+      phoneNumberId: settings.phoneNumberId.trim(),
+      recipients: recipients(),
+      templateName: settings.templateName.trim(),
+      language: settings.language.trim(),
+      sendRecovery: settings.sendRecovery,
+      offlineDelaySeconds: settings.offlineDelaySeconds,
+      ...(tokenValue ? { accessToken: tokenValue } : {}),
+    };
+  }
+
+  function validateDraft() {
+    const current = payload();
+    if (!current.enabled) return "";
+    if (!current.graphApiVersion) return "Enter the Meta Graph API version.";
+    if (!current.phoneNumberId) return "Enter the WhatsApp phone number ID.";
+    if (current.recipients.length === 0) {
+      return "Add at least one WhatsApp recipient.";
+    }
+    if (!current.templateName || !current.language) {
+      return "Enter the approved template name and language.";
+    }
+    if (!settings.accessTokenConfigured && !current.accessToken) {
+      return "Enter a permanent access token before enabling WhatsApp.";
+    }
+    return "";
+  }
+
+  async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const validationError = validateDraft();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setBusy("save");
+    setError("");
+    try {
+      const response = await saveWhatsAppAlertSettings(payload(), token);
+      setSettings(response);
+      setRecipientsDraft(response.recipients.join("\n"));
+      setAccessToken("");
+      onToast("WhatsApp alert settings saved");
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "WhatsApp settings could not be saved.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function sendTest() {
+    const current = payload();
+    if (current.recipients.length === 0) {
+      setError("Add at least one recipient before sending a test.");
+      return;
+    }
+    if (!settings.accessTokenConfigured && !current.accessToken) {
+      setError("Enter an access token before sending a test.");
+      return;
+    }
+    setBusy("test");
+    setError("");
+    setTestResult(null);
+    try {
+      const response = await testWhatsAppAlertSettings(current, token);
+      setTestResult(response);
+      setSettings((existing) => ({
+        ...existing,
+        lastTestAt: new Date().toISOString(),
+        lastTestOk: response.ok,
+        lastTestMessage: response.message,
+      }));
+      onToast(
+        response.ok
+          ? `WhatsApp test accepted for ${response.recipientCount} ${
+              response.recipientCount === 1 ? "recipient" : "recipients"
+            }`
+          : "WhatsApp test failed",
+      );
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiError
+          ? requestError.message
+          : "WhatsApp test could not be sent.";
+      setTestResult({ ok: false, message, recipientCount: 0 });
+      setError(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <section className="panel whatsapp-alert-panel">
+      <div className="panel-header">
+        <div className="panel-title">
+          <h3>WhatsApp delivery</h3>
+          <p>Administrator configuration for infrastructure alerts</p>
+        </div>
+        <span
+          className={`status-pill ${settings.enabled ? "online" : "warning"}`}
+        >
+          {settings.enabled ? "Enabled" : "Disabled"}
+        </span>
+      </div>
+      {!connected ? (
+        <div className="empty-state compact-empty-state">
+          <div>
+            <span className="empty-state-icon">
+              <WifiOff size={21} />
+            </span>
+            <h3>Collector unavailable</h3>
+            <p>Reconnect the collector to manage WhatsApp delivery.</p>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={saveSettings}>
+          <fieldset
+            className="page-fieldset"
+            disabled={loading || Boolean(busy)}
+          >
+            <div className="whatsapp-settings-layout">
+              <div className="whatsapp-settings-form">
+                <label className="setting-toggle-card">
+                  <input
+                    checked={settings.enabled}
+                    onChange={(event) =>
+                      updateSettings({ enabled: event.target.checked })
+                    }
+                    type="checkbox"
+                  />
+                  <span>
+                    <strong>Send WhatsApp alerts</strong>
+                    <small>
+                      Device and remote database offline events
+                    </small>
+                  </span>
+                </label>
+                <div className="form-grid whatsapp-form-grid">
+                  <div className="form-group">
+                    <label htmlFor="whatsapp-api-version">
+                      Graph API version
+                    </label>
+                    <input
+                      className="form-control"
+                      id="whatsapp-api-version"
+                      onChange={(event) =>
+                        updateSettings({ graphApiVersion: event.target.value })
+                      }
+                      placeholder="Use the version configured in Meta"
+                      value={settings.graphApiVersion}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="whatsapp-phone-number-id">
+                      Phone number ID
+                    </label>
+                    <input
+                      className="form-control"
+                      id="whatsapp-phone-number-id"
+                      onChange={(event) =>
+                        updateSettings({ phoneNumberId: event.target.value })
+                      }
+                      placeholder="Meta WhatsApp phone number ID"
+                      value={settings.phoneNumberId}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="whatsapp-template-name">
+                      Approved template name
+                    </label>
+                    <input
+                      className="form-control"
+                      id="whatsapp-template-name"
+                      onChange={(event) =>
+                        updateSettings({ templateName: event.target.value })
+                      }
+                      placeholder="modbus_system_alert"
+                      value={settings.templateName}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="whatsapp-language">Template language</label>
+                    <input
+                      className="form-control"
+                      id="whatsapp-language"
+                      onChange={(event) =>
+                        updateSettings({ language: event.target.value })
+                      }
+                      placeholder="en_US"
+                      value={settings.language}
+                    />
+                  </div>
+                  <div className="form-group full">
+                    <label htmlFor="whatsapp-recipients">Recipients</label>
+                    <textarea
+                      className="form-control whatsapp-recipients"
+                      id="whatsapp-recipients"
+                      onChange={(event) =>
+                        setRecipientsDraft(event.target.value)
+                      }
+                      placeholder={"919876543210\n971501234567"}
+                      rows={3}
+                      value={recipientsDraft}
+                    />
+                    <p className="form-help">
+                      One international number per line, including country code.
+                      A leading + is accepted and removed when saved.
+                    </p>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="whatsapp-delay">
+                      Offline delay (seconds)
+                    </label>
+                    <input
+                      className="form-control"
+                      id="whatsapp-delay"
+                      min={0}
+                      onChange={(event) =>
+                        updateSettings({
+                          offlineDelaySeconds: Number(event.target.value),
+                        })
+                      }
+                      step={1}
+                      type="number"
+                      value={settings.offlineDelaySeconds}
+                    />
+                    <p className="form-help">
+                      Avoids alerts for short communication interruptions.
+                    </p>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="whatsapp-access-token">Access token</label>
+                    <input
+                      autoComplete="new-password"
+                      className="form-control"
+                      id="whatsapp-access-token"
+                      onChange={(event) => setAccessToken(event.target.value)}
+                      placeholder={
+                        settings.accessTokenConfigured
+                          ? "Configured · leave blank to keep"
+                          : "Paste permanent access token"
+                      }
+                      type="password"
+                      value={accessToken}
+                    />
+                    <p className="form-help">
+                      {settings.accessTokenConfigured
+                        ? "A protected token is already configured. It is never returned to the browser."
+                        : "The token is protected by the collector after saving."}
+                    </p>
+                  </div>
+                  <label className="setting-toggle-card form-group full">
+                    <input
+                      checked={settings.sendRecovery}
+                      onChange={(event) =>
+                        updateSettings({ sendRecovery: event.target.checked })
+                      }
+                      type="checkbox"
+                    />
+                    <span>
+                      <strong>Send recovery messages</strong>
+                      <small>
+                        Notify recipients when a device or database comes back
+                        online.
+                      </small>
+                    </span>
+                  </label>
+                </div>
+                {error ? (
+                  <p
+                    className="login-error whatsapp-settings-error"
+                    role="alert"
+                  >
+                    {error}
+                  </p>
+                ) : null}
+                {testResult ? (
+                  <div
+                    className={`whatsapp-test-result ${
+                      testResult.ok ? "success" : "failed"
+                    }`}
+                    role="status"
+                  >
+                    <strong>
+                      {testResult.ok ? "Test accepted by Meta" : "Test failed"}
+                    </strong>
+                    <span>{testResult.message}</span>
+                  </div>
+                ) : null}
+                <div className="button-row whatsapp-form-actions">
+                  <button
+                    className="button secondary"
+                    disabled={loading || Boolean(busy)}
+                    onClick={() => void sendTest()}
+                    type="button"
+                  >
+                    <Send size={14} />
+                    {busy === "test" ? "Sending…" : "Send test"}
+                  </button>
+                  <button
+                    className="button primary"
+                    disabled={loading || Boolean(busy)}
+                    type="submit"
+                  >
+                    <Save size={14} />
+                    {busy === "save" ? "Saving…" : "Save WhatsApp settings"}
+                  </button>
+                </div>
+              </div>
+              <aside className="whatsapp-template-guide">
+                <MessageCircle size={18} />
+                <div>
+                  <h4>Meta template setup</h4>
+                  <p>
+                    Create and approve one WhatsApp template with exactly five
+                    body variables, then enter its name and language here.
+                  </p>
+                </div>
+                <ol>
+                  <li>
+                    <code>{"{{1}}"}</code>
+                    <span>State · OFFLINE or RECOVERED</span>
+                  </li>
+                  <li>
+                    <code>{"{{2}}"}</code>
+                    <span>Type · Device or Remote database</span>
+                  </li>
+                  <li>
+                    <code>{"{{3}}"}</code>
+                    <span>Source · Device or database name</span>
+                  </li>
+                  <li>
+                    <code>{"{{4}}"}</code>
+                    <span>Detail · What the logger observed</span>
+                  </li>
+                  <li>
+                    <code>{"{{5}}"}</code>
+                    <span>Timestamp · Collector event time</span>
+                  </li>
+                </ol>
+                <p className="whatsapp-template-note">
+                  Add each recipient to the permitted test list while the Meta
+                  app is in development mode. Use a dedicated system-user token
+                  for production.
+                </p>
+                <dl className="whatsapp-test-history">
+                  <div>
+                    <dt>Last test</dt>
+                    <dd>{formatDateTime(settings.lastTestAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>Result</dt>
+                    <dd>
+                      {settings.lastTestOk === null
+                        ? "Not tested"
+                        : settings.lastTestOk
+                          ? "Successful"
+                          : "Failed"}
+                    </dd>
+                  </div>
+                </dl>
+              </aside>
+            </div>
+          </fieldset>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function TagAlarmsView({
+  connected,
+  onToast,
+  token,
+}: {
+  connected: boolean;
+  onToast: (text: string) => void;
+  token?: string;
+}) {
+  const [devices, setDevices] = useState<ApiDevice[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [registers, setRegisters] = useState<ApiRegister[]>([]);
+  const [selectedRegisterId, setSelectedRegisterId] = useState("");
+  const [rules, setRules] = useState<ApiTagAlarmRule[]>([]);
+  const [loading, setLoading] = useState(connected);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  
+  // New rule form state
+  const [newRuleName, setNewRuleName] = useState("");
+  const [newRuleCondition, setNewRuleCondition] = useState<"above" | "below" | "inside" | "outside" | "hi" | "lo" | "hii" | "lolo">("above");
+  const [newRuleSeverity, setNewRuleSeverity] = useState<"warning" | "critical">("warning");
+  const [newRuleThresholdHi, setNewRuleThresholdHi] = useState("");
+  const [newRuleThresholdLo, setNewRuleThresholdLo] = useState("");
+  const [newRuleDeadband, setNewRuleDeadband] = useState("0");
+
+  // Edit rule state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [editRuleName, setEditRuleName] = useState("");
+  const [editRuleCondition, setEditRuleCondition] = useState<"above" | "below" | "inside" | "outside" | "hi" | "lo" | "hii" | "lolo">("above");
+  const [editRuleSeverity, setEditRuleSeverity] = useState<"warning" | "critical">("warning");
+  const [editRuleThresholdHi, setEditRuleThresholdHi] = useState("");
+  const [editRuleThresholdLo, setEditRuleThresholdLo] = useState("");
+  const [editRuleDeadband, setEditRuleDeadband] = useState("0");
+
+  // Device creation modal states
+  const [showDeviceModal, setShowDeviceModal] = useState(false);
+  const [newDeviceName, setNewDeviceName] = useState('');
+  const [newDeviceEndpoint, setNewDeviceEndpoint] = useState('');
+
+  useEffect(() => {
+    if (!connected) return;
+    
+    async function loadDevices() {
+      try {
+        const deviceList = await fetchDevices(token);
+        setDevices(deviceList);
+        if (deviceList.length > 0 && !selectedDeviceId) {
+          setSelectedDeviceId(deviceList[0].id);
+        }
+      } catch {
+        onToast("Failed to load devices");
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    loadDevices();
+  }, [connected, token]);
+
+  useEffect(() => {
+    if (!selectedDeviceId || !connected) return;
+    
+    async function loadRegisters() {
+      try {
+        const registerList = await fetchRegisters(selectedDeviceId, token);
+        setRegisters(registerList);
+        if (registerList.length > 0 && !selectedRegisterId) {
+          setSelectedRegisterId(registerList[0].id);
+        }
+      } catch {
+        onToast("Failed to load registers");
+      }
+    }
+    
+    loadRegisters();
+  }, [selectedDeviceId, connected, token]);
+
+  useEffect(() => {
+    if (!selectedRegisterId || !connected) return;
+    
+    async function loadRules() {
+      try {
+        const refreshedRules = await fetchTagAlarmRules(selectedRegisterId, token);
+        setRules(refreshedRules.items || []);
+      } catch {
+        onToast("Failed to load alarm rules");
+      }
+    }
+    
+    loadRules();
+  }, [selectedRegisterId, connected, token]);
+
+  async function handleDeleteRule(ruleId: string) {
+    if (!confirm("Are you sure you want to delete this alarm rule?")) return;
+    
+    try {
+      await deleteTagAlarmRule(selectedRegisterId, ruleId, token);
+      onToast("Alarm rule deleted");
+      // Refresh rules list
+      const result = await fetchTagAlarmRules(selectedRegisterId, token);
+      setRules(result.items || []);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to delete alarm rule");
+    }
+  }
+
+  function handleEditRule(rule: ApiTagAlarmRule) {
+    console.log("Editing rule:", rule);
+    // Reset form state first to avoid stale data
+    setEditRuleName("");
+    setEditRuleCondition("above");
+    setEditRuleSeverity("warning");
+    setEditRuleThresholdHi("");
+    setEditRuleThresholdLo("");
+    setEditRuleDeadband("0");
+    
+    // Set the rule data
+    setEditingRuleId(rule.id);
+    setEditRuleName(rule.name || "");
+    setEditRuleCondition((rule.condition as any) || "above");
+    setEditRuleSeverity(rule.severity || "warning");
+    setEditRuleThresholdHi(rule.threshold_high != null ? rule.threshold_high.toString() : "");
+    setEditRuleThresholdLo(rule.threshold_low != null ? rule.threshold_low.toString() : "");
+    setEditRuleDeadband((rule.deadband ?? 0).toString());
+    setShowEditModal(true);
+  }
+
+  async function handleUpdateRule() {
+    if (!editingRuleId || !editRuleName.trim()) {
+      onToast("Rule name is required");
+      return;
+    }
+    
+    const parseThreshold = (v: string) => (v && v.trim() !== "" ? parseFloat(v) : null);
+    
+    try {
+      await updateTagAlarmRule(selectedRegisterId, editingRuleId, {
+        name: editRuleName,
+        severity: editRuleSeverity,
+        condition: editRuleCondition,
+        thresholdHigh: parseThreshold(editRuleThresholdHi),
+        thresholdLow: parseThreshold(editRuleThresholdLo),
+        deadband: editRuleDeadband && editRuleDeadband.trim() !== "" ? parseFloat(editRuleDeadband) : 0,
+      }, token);
+      
+      onToast("Alarm rule updated");
+      setShowEditModal(false);
+      setEditingRuleId(null);
+      setEditRuleName("");
+      setEditRuleCondition("above");
+      setEditRuleSeverity("warning");
+      setEditRuleThresholdHi("");
+      setEditRuleThresholdLo("");
+      setEditRuleDeadband("0");
+      
+      // Refresh rules list
+      const result = await fetchTagAlarmRules(selectedRegisterId, token);
+      setRules(result.items || []);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to update alarm rule");
+    }
+  }
+
+  async function handleCreateRule() {
+    if (!newRuleName.trim()) {
+      onToast("Rule name is required");
+      return;
+    }
+    
+    const parseThreshold = (v: string) => (v && v.trim() !== "" ? parseFloat(v) : null);
+    
+    try {
+      await createTagAlarmRule(selectedRegisterId, {
+        name: newRuleName,
+        severity: newRuleSeverity,
+        condition: newRuleCondition,
+        thresholdHigh: parseThreshold(newRuleThresholdHi),
+        thresholdLow: parseThreshold(newRuleThresholdLo),
+        deadband: newRuleDeadband && newRuleDeadband.trim() !== "" ? parseFloat(newRuleDeadband) : 0,
+      }, token);
+      
+      onToast("Alarm rule created");
+      setShowCreateModal(false);
+      setNewRuleName("");
+      setNewRuleCondition("above");
+      setNewRuleSeverity("warning");
+      setNewRuleThresholdHi("");
+      setNewRuleThresholdLo("");
+      setNewRuleDeadband("0");
+      
+      // Refresh rules list
+      const result = await fetchTagAlarmRules(selectedRegisterId, token);
+      setRules(result.items || []);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to create alarm rule");
+    }
+  }
+
+  if (!connected) return <div className="text-red-600 font-semibold">Disconnected</div>;
+  if (loading) return <div className="flex items-center justify-center h-64"><RefreshCw size={24} className="animate-spin" /></div>;
+
+  const selectedRegister = registers.find(r => r.id === selectedRegisterId);
+  const selectedDevice = devices.find(d => d.id === selectedDeviceId);
+
+  async function handleCreateDevice() {
+    if (!newDeviceName.trim()) {
+      onToast("Device name is required");
+      return;
+    }
+    
+    try {
+      await createApiDevice({
+        categoryId: null,
+        groupId: null,
+        name: newDeviceName,
+        protocol: 'tcp', // or detect from endpoint
+        tcpHost: newDeviceEndpoint.split(':')[0],
+        tcpPort: parseInt(newDeviceEndpoint.split(':')[1] || '502'),
+        unitId: 1,
+        pollIntervalMs: 1000,
+        saveIntervalMs: 60000,
+        readBlockSize: 100,
+        timeoutMs: 1000,
+        retries: 3,
+        postgresEnabled: false,
+        postgresDownsampleEnabled: false,
+        postgresRawTable: '',
+        postgresDownsampleTable: '',
+        postgresDownsampleIntervalSec: 60,
+        postgresRawRetentionDays: 30,
+        postgresDownsampleRetentionDays: 90,
+        postgresMaintenanceIntervalHours: 24,
+        enabled: true
+      }, token);
+      
+      onToast("Device created successfully");
+      setShowDeviceModal(false);
+      setNewDeviceName('');
+      setNewDeviceEndpoint('');
+      
+      // Refresh devices list
+      const result = await fetchDevices(token);
+      setDevices(result || []);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to create device");
+    }
+  }
+
+  // Empty state when no devices exist
+  if (devices.length === 0) {
+    return (
+      <section className="tag-alarms-view">
+        <div className="empty-state-container">
+          <div className="empty-icon-wrapper">
+            <Bell size={48} className="text-gray-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-gray-700 mb-2">No Devices Configured</h3>
+          <p className="text-gray-600 mb-6 max-w-md mx-auto">
+            To set up tag alarms, you first need to add a device. Create a device and its registers (tags) from the Devices page, then come back here to configure alarm rules.
+          </p>
+          <button 
+            className="button primary"
+            onClick={() => setShowDeviceModal(true)}
+          >
+            <Plus size={16} /> Add First Device
+          </button>
+          
+          {/* Quick guide */}
+          <div className="mt-8 p-4 bg-blue-50 rounded-lg max-w-md mx-auto">
+            <h4 className="font-semibold text-blue-900 mb-2">Quick Setup Guide:</h4>
+            <ol className="text-sm text-blue-800 list-decimal list-inside space-y-1">
+              <li>Go to "Devices" page</li>
+              <li>Add a new device with endpoint details</li>
+              <li>Create registers (tags) for that device</li>
+              <li>Come back here to configure alarm rules</li>
+            </ol>
+          </div>
+        </div>
+
+        {/* Device Creation Modal */}
+        {showDeviceModal && (
+          <div className="modal-backdrop" onClick={() => setShowDeviceModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <h3>Create New Device</h3>
+              
+              <div className="form-group">
+                <label>Device Name:</label>
+                <input 
+                  type="text" 
+                  value={newDeviceName}
+                  onChange={(e) => setNewDeviceName(e.target.value)}
+                  placeholder="e.g., PLC-01, Sensor Array A"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Endpoint (IP:Port or Serial):</label>
+                <input 
+                  type="text" 
+                  value={newDeviceEndpoint}
+                  onChange={(e) => setNewDeviceEndpoint(e.target.value)}
+                  placeholder="e.g., 192.168.1.100:502 or /dev/ttyUSB0"
+                />
+              </div>
+
+              <div className="button-row">
+                <button 
+                  className="button secondary"
+                  onClick={() => setShowDeviceModal(false)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="button primary"
+                  onClick={handleCreateDevice}
+                >
+                  Create Device
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  // Empty state when device has no registers
+  if (registers.length === 0) {
+    return (
+      <section className="tag-alarms-view">
+        <div className="empty-state-container">
+          <div className="empty-icon-wrapper">
+            <Tags size={48} className="text-gray-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-gray-700 mb-2">No Registers Found</h3>
+          <p className="text-gray-600 mb-6 max-w-md mx-auto">
+            Select a device above, then go to the "Registers" page to add tags (registers) for that device. Once registers exist, you can configure alarm rules here.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="tag-alarms-view">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Bell size={24} className="text-blue-600" />
+          Tag Alarms
+        </h2>
+        {selectedRegisterId && (
+          <button 
+            className="button primary"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <Plus size={14} /> Add Alarm Rule
+          </button>
+        )}
+      </div>
+
+      {/* Device & Register Selection Panel */}
+      <div className="panel kpi-card p-6 mb-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Settings size={18} className="text-blue-600" />
+          Configuration Scope
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Device Selection */}
+          <div className="form-group">
+            <label className="font-medium mb-2 block flex items-center gap-2">
+              <ServerCog size={14} className="text-gray-500" />
+              Device
+            </label>
+            <select 
+              value={selectedDeviceId} 
+              onChange={(e) => setSelectedDeviceId(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white hover:border-blue-400 transition-colors"
+            >
+              {devices.map((device) => (
+                <option key={device.id} value={device.id}>
+                  {device.name} ({device.protocol === 'tcp' ? `${device.tcpHost}:${device.tcpPort}` : (device.serialPort || device.rtuAddress || 'N/A')})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Register Selection */}
+          <div className="form-group">
+            <label className="font-medium mb-2 block flex items-center gap-2">
+              <Tags size={14} className="text-gray-500" />
+              Tag / Register
+            </label>
+            <select 
+              value={selectedRegisterId} 
+              onChange={(e) => setSelectedRegisterId(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white hover:border-blue-400 transition-colors"
+            >
+              {registers.map((register) => (
+                <option key={register.id} value={register.id}>
+                  {register.name} ({register.address}) - FC{register.functionCode}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Alarm Rules List */}
+      {selectedRegisterId && (
+        <div className="panel kpi-card p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <AlertTriangle size={18} className="text-orange-500" />
+            Alarm Rules for: <span className="font-normal text-gray-700">{selectedRegister?.name}</span>
+          </h3>
+
+          {rules.length === 0 ? (
+            <div className="empty-state-container py-8 text-center">
+              <Bell size={48} className="text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500 mb-4">No alarm rules configured for this tag yet.</p>
+              <button 
+                className="button primary"
+                onClick={() => setShowCreateModal(true)}
+              >
+                <Plus size={14} /> Create First Alarm Rule
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="data-table min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Condition</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Severity</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Threshold Low</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Threshold High</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deadband</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Enabled</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {rules.map((rule) => (
+                    <tr key={rule.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{rule.name}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          rule.condition === 'hi' || rule.condition === 'hii' ? 'bg-red-100 text-red-800' :
+                          rule.condition === 'lo' || rule.condition === 'lolo' ? 'bg-blue-100 text-blue-800' :
+                          rule.condition === 'above' ? 'bg-green-100 text-green-800' :
+                          rule.condition === 'below' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-purple-100 text-purple-800'
+                        }`}>
+                          {rule.condition.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          rule.severity === 'critical' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {rule.severity}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{rule.threshold_low ?? '-'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{rule.threshold_high ?? '-'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{rule.deadband}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        {rule.enabled ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Enabled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                            Disabled
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <div className="row-actions">
+                          <button
+                            aria-label={`Edit ${rule.name}`}
+                            className="icon-button compact"
+                            onClick={() => handleEditRule(rule)}
+                            title="Edit alarm rule"
+                            type="button"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            aria-label={`Delete ${rule.name}`}
+                            className="icon-button compact danger"
+                            onClick={() => handleDeleteRule(rule.id)}
+                            title="Delete alarm rule"
+                            type="button"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Create Modal */}
+      {showCreateModal && (
+        <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>
+          <div className="modal-content max-w-md mx-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-semibold mb-5 flex items-center gap-2 pb-3 border-b border-gray-200">
+              <Plus size={20} className="text-blue-600" />
+              Create Alarm Rule
+            </h3>
+            
+            <div className="space-y-4">
+              <div className="form-group">
+                <label className="font-medium mb-1.5 block">Rule Name</label>
+                <input 
+                  type="text" 
+                  value={newRuleName}
+                  onChange={(e) => setNewRuleName(e.target.value)}
+                  placeholder="e.g., High Temperature Alert"
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Condition</label>
+                  <select 
+                    value={newRuleCondition}
+                    onChange={(e) => setNewRuleCondition(e.target.value as any)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors"
+                  >
+                    <option value="above">Above</option>
+                    <option value="below">Below</option>
+                    <option value="inside">Inside Range</option>
+                    <option value="outside">Outside Range</option>
+                    <option value="hi">HI - High</option>
+                    <option value="lo">LO - Low</option>
+                    <option value="hii">HII - High High</option>
+                    <option value="lolo">LOLO - Low Low</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Severity</label>
+                  <select 
+                    value={newRuleSeverity}
+                    onChange={(e) => setNewRuleSeverity(e.target.value as any)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors"
+                  >
+                    <option value="warning">Warning</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </div>
+              </div>
+
+            {/* High threshold for above/hi/hii conditions */}
+            {(newRuleCondition === "above" || 
+             newRuleCondition === "hi" || 
+             newRuleCondition === "hii") && (
+              <div className="form-group">
+                <label className="font-medium mb-1.5 block">High Threshold</label>
+                <input 
+                  type="number" 
+                  value={newRuleThresholdHi}
+                  onChange={(e) => setNewRuleThresholdHi(e.target.value)}
+                  placeholder="Enter threshold value"
+                  step="0.01"
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+            )}
+
+            {/* Low threshold for below/lo/lolo conditions */}
+            {(newRuleCondition === "below" || 
+             newRuleCondition === "lo" || 
+             newRuleCondition === "lolo") && (
+              <div className="form-group">
+                <label className="font-medium mb-1.5 block">Low Threshold</label>
+                <input 
+                  type="number" 
+                  value={newRuleThresholdLo}
+                  onChange={(e) => setNewRuleThresholdLo(e.target.value)}
+                  placeholder="Enter threshold value"
+                  step="0.01"
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+            )}
+
+            {/* Inside range - needs both thresholds (value must be BETWEEN them) */}
+            {newRuleCondition === "inside" && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Lower Limit</label>
+                  <input 
+                    type="number" 
+                    value={newRuleThresholdLo}
+                    onChange={(e) => setNewRuleThresholdLo(e.target.value)}
+                    placeholder="Minimum value"
+                    step="0.01"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Upper Limit</label>
+                  <input 
+                    type="number" 
+                    value={newRuleThresholdHi}
+                    onChange={(e) => setNewRuleThresholdHi(e.target.value)}
+                    placeholder="Maximum value"
+                    step="0.01"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Outside range - needs both thresholds (value triggers when OUTSIDE the range) */}
+            {newRuleCondition === "outside" && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Lower Limit</label>
+                  <input 
+                    type="number" 
+                    value={newRuleThresholdLo}
+                    onChange={(e) => setNewRuleThresholdLo(e.target.value)}
+                    placeholder="Lower limit"
+                    step="0.01"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Upper Limit</label>
+                  <input 
+                    type="number" 
+                    value={newRuleThresholdHi}
+                    onChange={(e) => setNewRuleThresholdHi(e.target.value)}
+                    placeholder="Upper limit"
+                    step="0.01"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="form-group bg-gray-50 p-3 rounded-lg border border-gray-200">
+              <label className="font-medium mb-1 block flex items-center gap-2">
+                <SlidersHorizontal size={14} /> Deadband (optional)
+              </label>
+              <input 
+                type="number" 
+                value={newRuleDeadband}
+                onChange={(e) => setNewRuleDeadband(e.target.value)}
+                placeholder="0"
+                min="0"
+                step="0.01"
+                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              />
+              <p className="text-xs text-muted mt-1.5">Value range to prevent alarm re-triggering after acknowledgment</p>
+            </div>
+
+            <div className="button-row mt-6 pt-4 border-t border-gray-100">
+              <button 
+                className="button secondary"
+                onClick={() => setShowCreateModal(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                className="button primary"
+                onClick={handleCreateRule}
+              >
+                Create Rule
+              </button>
+            </div>
+            {/* Close space-y-4 wrapper */}
+          </div>
+        </div>
+      </div>
+      )}
+
+      {/* Edit Rule Modal */}
+      {showEditModal && editingRuleId && (
+        <div className="modal-backdrop" onClick={() => {
+          setShowEditModal(false);
+          setEditingRuleId(null);
+          setEditRuleName("");
+          setEditRuleCondition("above");
+          setEditRuleSeverity("warning");
+          setEditRuleThresholdHi("");
+          setEditRuleThresholdLo("");
+          setEditRuleDeadband("0");
+        }}>
+          <div className="modal-content max-w-md mx-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-semibold mb-5 flex items-center gap-2 pb-3 border-b border-gray-200">
+              <Pencil size={20} className="text-blue-600" />
+              Edit Alarm Rule
+            </h3>
+            
+            <div className="space-y-4">
+              <div className="form-group">
+                <label className="font-medium mb-1.5 block">Rule Name</label>
+                <input 
+                  type="text" 
+                  value={editRuleName}
+                  onChange={(e) => setEditRuleName(e.target.value)}
+                  placeholder="e.g., High Temperature Alert"
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Condition</label>
+                  <select 
+                    value={editRuleCondition}
+                    onChange={(e) => setEditRuleCondition(e.target.value as any)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors"
+                  >
+                    <option value="above">Above</option>
+                    <option value="below">Below</option>
+                    <option value="inside">Inside Range</option>
+                    <option value="outside">Outside Range</option>
+                    <option value="hi">HI - High</option>
+                    <option value="lo">LO - Low</option>
+                    <option value="hii">HII - High High</option>
+                    <option value="lolo">LOLO - Low Low</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Severity</label>
+                  <select 
+                    value={editRuleSeverity}
+                    onChange={(e) => setEditRuleSeverity(e.target.value as any)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors"
+                  >
+                    <option value="warning">Warning</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </div>
+              </div>
+
+            {/* High threshold for above/hi/hii conditions */}
+            {(editRuleCondition === "above" || 
+             editRuleCondition === "hi" || 
+             editRuleCondition === "hii") && (
+              <div className="form-group">
+                <label className="font-medium mb-1.5 block">High Threshold</label>
+                <input 
+                  type="number" 
+                  value={editRuleThresholdHi}
+                  onChange={(e) => setEditRuleThresholdHi(e.target.value)}
+                  placeholder="Enter threshold value"
+                  step="0.01"
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+            )}
+
+            {/* Low threshold for below/lo/lolo conditions */}
+            {(editRuleCondition === "below" || 
+             editRuleCondition === "lo" || 
+             editRuleCondition === "lolo") && (
+              <div className="form-group">
+                <label className="font-medium mb-1.5 block">Low Threshold</label>
+                <input 
+                  type="number" 
+                  value={editRuleThresholdLo}
+                  onChange={(e) => setEditRuleThresholdLo(e.target.value)}
+                  placeholder="Enter threshold value"
+                  step="0.01"
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+            )}
+
+            {/* Inside range - needs both thresholds (value must be BETWEEN them) */}
+            {editRuleCondition === "inside" && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Lower Limit</label>
+                  <input 
+                    type="number" 
+                    value={editRuleThresholdLo}
+                    onChange={(e) => setEditRuleThresholdLo(e.target.value)}
+                    placeholder="Minimum value"
+                    step="0.01"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Upper Limit</label>
+                  <input 
+                    type="number" 
+                    value={editRuleThresholdHi}
+                    onChange={(e) => setEditRuleThresholdHi(e.target.value)}
+                    placeholder="Maximum value"
+                    step="0.01"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Outside range - needs both thresholds (value triggers when OUTSIDE the range) */}
+            {editRuleCondition === "outside" && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Lower Limit</label>
+                  <input 
+                    type="number" 
+                    value={editRuleThresholdLo}
+                    onChange={(e) => setEditRuleThresholdLo(e.target.value)}
+                    placeholder="Lower limit"
+                    step="0.01"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="font-medium mb-1.5 block">Upper Limit</label>
+                  <input 
+                    type="number" 
+                    value={editRuleThresholdHi}
+                    onChange={(e) => setEditRuleThresholdHi(e.target.value)}
+                    placeholder="Upper limit"
+                    step="0.01"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="form-group bg-gray-50 p-3 rounded-lg border border-gray-200">
+              <label className="font-medium mb-1 block flex items-center gap-2">
+                <SlidersHorizontal size={14} /> Deadband (optional)
+              </label>
+              <input 
+                type="number" 
+                value={editRuleDeadband}
+                onChange={(e) => setEditRuleDeadband(e.target.value)}
+                placeholder="0"
+                min="0"
+                step="0.01"
+                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              />
+              <p className="text-xs text-muted mt-1.5">Value range to prevent alarm re-triggering after acknowledgment</p>
+            </div>
+
+            <div className="button-row mt-6 pt-4 border-t border-gray-100">
+              <button 
+                className="button secondary"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingRuleId(null);
+                  setEditRuleName("");
+                  setEditRuleCondition("above");
+                  setEditRuleSeverity("warning");
+                  setEditRuleThresholdHi("");
+                  setEditRuleThresholdLo("");
+                  setEditRuleDeadband("0");
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="button primary"
+                onClick={handleUpdateRule}
+              >
+                Update Rule
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      )}
+    </section>
+  );
+}
+
+function GroupAlarmsView({
+  canConfigure,
+  connected,
+  onToast,
+  token,
+}: {
+  canConfigure: boolean;
+  connected: boolean;
+  onToast: (text: string) => void;
+  token?: string;
+}) {
+  const [groups, setGroups] = useState<ApiAlarmGroup[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<AlarmGroupDetail | null>(null);
+  const [loading, setLoading] = useState(connected);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupDescription, setNewGroupDescription] = useState("");
+  const [selectedRegisters, setSelectedRegisters] = useState<string[]>([]);
+  const [availableRegisters, setAvailableRegisters] = useState<ApiRegister[]>([]);
+  const [showRuleModal, setShowRuleModal] = useState(false);
+  const [newRuleCondition, setNewRuleCondition] = useState<"hi" | "lo" | "hii" | "lolo">("hi");
+  const [newRuleThresholdHi, setNewRuleThresholdHi] = useState("");
+  const [newRuleThresholdLo, setNewRuleThresholdLo] = useState("");
+
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    
+    async function loadGroups() {
+      try {
+        const response = await fetchAlarmGroups(token);
+        if (active) setGroups(response.items || []);
+      } catch {
+        // Silently handle error
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    
+    loadGroups();
+    return () => { active = false; };
+  }, [connected, token]);
+
+  async function loadGroupDetail(id: string) {
+    try {
+      const detail = await fetchAlarmGroupDetail(id, token);
+      setSelectedGroup(detail);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to load group details");
+    }
+  }
+
+  async function createGroup() {
+    if (!newGroupName.trim()) {
+      onToast("Group name is required");
+      return;
+    }
+    
+    try {
+      await createAlarmGroup({ name: newGroupName, description: newGroupDescription || undefined }, token);
+      onToast("Alarm group created successfully");
+      setShowCreateModal(false);
+      setNewGroupName("");
+      setNewGroupDescription("");
+      
+      // Refresh groups list
+      const response = await fetchAlarmGroups(token);
+      setGroups(response.items || []);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to create alarm group");
+    }
+  }
+
+  async function deleteGroup(id: string, name: string) {
+    if (!confirm(`Are you sure you want to delete alarm group "${name}"? This will remove all associated rules and member associations.`)) {
+      return;
+    }
+    
+    try {
+      await deleteAlarmGroup(id, token);
+      onToast("Alarm group deleted");
+      setSelectedGroup(null);
+      
+      // Refresh groups list
+      const response = await fetchAlarmGroups(token);
+      setGroups(response.items || []);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to delete alarm group");
+    }
+  }
+
+  async function addMembersToGroup(groupId: string, registerIds: string[]) {
+    try {
+      for (const registerId of registerIds) {
+        await addAlarmGroupMember(groupId, registerId, 1, token);
+      }
+      onToast(`Added ${registerIds.length} registers to group`);
+      
+      // Refresh group detail if currently viewing this group
+      if (selectedGroup?.id === groupId) {
+        await loadGroupDetail(groupId);
+      }
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to add members");
+    }
+  }
+
+  async function removeMemberFromGroup(groupId: string, registerId: string) {
+    try {
+      await removeAlarmGroupMember(groupId, registerId, token);
+      onToast("Member removed from group");
+      
+      // Refresh group detail if currently viewing this group
+      if (selectedGroup?.id === groupId) {
+        await loadGroupDetail(groupId);
+      }
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to remove member");
+    }
+  }
+
+  async function createRule() {
+    if (!selectedGroup || !newRuleCondition) return;
+    
+    const payload = {
+      name: `Group ${selectedGroup.name} ${newRuleCondition.toUpperCase()} Rule`,
+      severity: "warning" as const,
+      condition: newRuleCondition,
+      threshold_hi: newRuleThresholdHi ? parseFloat(newRuleThresholdHi) : null,
+      threshold_lo: newRuleThresholdLo ? parseFloat(newRuleThresholdLo) : null,
+      deadband: 0,
+      enabled: true,
+    };
+    
+    try {
+      await createAlarmGroupRule(selectedGroup.id, payload, token);
+      onToast("Alarm rule created");
+      setShowRuleModal(false);
+      
+      // Refresh group detail
+      await loadGroupDetail(selectedGroup.id);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to create alarm rule");
+    }
+  }
+
+  async function deleteRule(ruleId: string) {
+    if (!selectedGroup || !confirm("Delete this alarm rule?")) return;
+    
+    try {
+      await deleteAlarmGroupRule(selectedGroup.id, ruleId, token);
+      onToast("Alarm rule deleted");
+      
+      // Refresh group detail
+      await loadGroupDetail(selectedGroup.id);
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to delete alarm rule");
+    }
+  }
+
+  async function fetchAvailableRegisters() {
+    try {
+      // For alarm groups, we need to get all registers from all devices
+      // This is a simplified approach - in a real implementation, you might want to
+      // filter by device or use a different API endpoint
+      const allDevices = await fetchDevices(token);
+      if (allDevices.length > 0) {
+        // Get registers from the first device as an example
+        const firstDeviceId = allDevices[0].id;
+        const registers = await fetchRegisters(firstDeviceId, token);
+        setAvailableRegisters(registers || []);
+      } else {
+        setAvailableRegisters([]);
+      }
+    } catch (error) {
+      onToast(error instanceof ApiError ? error.message : "Failed to load registers");
+    }
+  }
+
+  return (
+    <section className="dashboard-section">
+      <SectionIntro
+        eyebrow="Multi-Device Grouping"
+        title="Group-wise Tag Value Alerts"
+        copy="Create alarm groups that span multiple devices. Set Hi/Lo/HIHI/LOLO thresholds across grouped registers and trigger alerts when any device in the group exceeds limits."
+      >
+        <button
+          className="button primary"
+          disabled={!connected}
+          onClick={() => setShowCreateModal(true)}
+          type="button"
+        >
+          <Plus size={14} />
+          Create Alarm Group
+        </button>
+      </SectionIntro>
+
+      {/* Groups List */}
+      {loading ? (
+        <div className="empty-state">
+          <div>Loading alarm groups...</div>
+        </div>
+      ) : groups.length === 0 ? (
+        <div className="empty-state compact-empty-state">
+          <div>
+            <span className="empty-state-icon future-alert-icon">
+              <Tags size={21} />
+            </span>
+            <h3>No alarm groups configured</h3>
+            <p>Create your first multi-device alarm group to set Hi/Lo/HIHI/LOLO thresholds across multiple devices.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="card-grid">
+          {groups.map((group) => (
+            <div key={group.id} className={`dashboard-card ${selectedGroup?.id === group.id ? 'card-highlighted' : ''}`}>
+              <div className="card-header">
+                <h3>{group.name}</h3>
+                <button
+                  className="icon-button"
+                  onClick={() => deleteGroup(group.id, group.name)}
+                  title="Delete group"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+              {group.description && (
+                <p className="card-description">{group.description}</p>
+              )}
+              <div className="card-meta">
+                <span>Created: {new Date(group.created_at).toLocaleDateString()}</span>
+              </div>
+              <button
+                className="button secondary"
+                onClick={() => loadGroupDetail(group.id)}
+                type="button"
+              >
+                View Details
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Group Detail View */}
+      {selectedGroup && (
+        <section className="dashboard-section">
+          <h2 className="section-title">
+            Group: {selectedGroup.name}
+            <button
+              className="icon-button"
+              onClick={() => setSelectedGroup(null)}
+              title="Close group detail"
+            >
+              <X size={18} />
+            </button>
+          </h2>
+
+          {/* Members Section */}
+          <div className="card">
+            <div className="card-header">
+              <h3>Group Members ({selectedGroup.members.length})</h3>
+              <button
+                className="button secondary"
+                onClick={() => {
+                  fetchAvailableRegisters();
+                  setSelectedRegisters([]);
+                }}
+                type="button"
+              >
+                <Plus size={14} />
+                Add Registers
+              </button>
+            </div>
+
+            {selectedGroup.members.length === 0 ? (
+              <div className="empty-state compact-empty-state">
+                <p>No registers in this group yet. Add registers from different devices to create a multi-device alarm group.</p>
+              </div>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Register ID</th>
+                    <th>Weight</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedGroup.members.map((member) => (
+                    <tr key={member.register_id}>
+                      <td>{member.register_id}</td>
+                      <td>{member.weight}</td>
+                      <td>
+                        <button
+                          className="icon-button"
+                          onClick={() => removeMemberFromGroup(selectedGroup.id, member.register_id)}
+                          title="Remove from group"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {/* Add Registers Modal */}
+            {availableRegisters.length > 0 && (
+              <div className="modal-overlay">
+                <div className="modal-content">
+                  <h3>Select Registers to Add</h3>
+                  <p>Add the following registers from different devices:</p>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th><input type="checkbox" onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedRegisters(availableRegisters.map(r => r.id));
+                          } else {
+                            setSelectedRegisters([]);
+                          }
+                        }} /></th>
+                        <th>ID</th>
+                        <th>Name</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {availableRegisters.map((register) => (
+                        <tr key={register.id}>
+                          <td><input type="checkbox" checked={selectedRegisters.includes(register.id)} onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedRegisters([...selectedRegisters, register.id]);
+                            } else {
+                              setSelectedRegisters(selectedRegisters.filter(id => id !== register.id));
+                            }
+                          }} /></td>
+                          <td>{register.id}</td>
+                          <td>{register.name}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="modal-actions">
+                    <button
+                      className="button secondary"
+                      onClick={() => setSelectedRegisters([])}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="button primary"
+                      disabled={selectedRegisters.length === 0}
+                      onClick={() => {
+                        addMembersToGroup(selectedGroup.id, selectedRegisters);
+                        setSelectedRegisters([]);
+                      }}
+                    >
+                      Add Selected ({selectedRegisters.length})
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Rules Section */}
+          <div className="card">
+            <div className="card-header">
+              <h3>Alarm Rules</h3>
+              <button
+                className="button secondary"
+                onClick={() => setShowRuleModal(true)}
+                type="button"
+              >
+                <Plus size={14} />
+                Add Rule
+              </button>
+            </div>
+
+            {selectedGroup.rules.length === 0 ? (
+              <div className="empty-state compact-empty-state">
+                <p>No alarm rules configured. Create a rule to set Hi/Lo/HIHI/LOLO thresholds for this group.</p>
+              </div>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Condition</th>
+                    <th>Threshold HI</th>
+                    <th>Threshold LO</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedGroup.rules.map((rule) => (
+                    <tr key={rule.id}>
+                      <td>{rule.name}</td>
+                      <td><span className={`badge badge-${rule.severity}`}>{rule.condition.toUpperCase()}</span></td>
+                      <td>{rule.threshold_hi ?? '—'}</td>
+                      <td>{rule.threshold_lo ?? '—'}</td>
+                      <td>{rule.enabled ? 'Enabled' : 'Disabled'}</td>
+                      <td>
+                        <button
+                          className="icon-button"
+                          onClick={() => deleteRule(rule.id)}
+                          title="Delete rule"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {/* Create Rule Modal */}
+            {showRuleModal && (
+              <div className="modal-overlay">
+                <div className="modal-content">
+                  <h3>Create Alarm Rule</h3>
+                  <p>Set Hi/Lo/HIHI/LOLO threshold for this group:</p>
+                  
+                  <div className="form-group">
+                    <label htmlFor="rule-condition">Condition Type</label>
+                    <select
+                      id="rule-condition"
+                      value={newRuleCondition}
+                      onChange={(e) => setNewRuleCondition(e.target.value as any)}
+                    >
+                      <option value="hi">HI (High Alarm)</option>
+                      <option value="lo">LO (Low Alarm)</option>
+                      <option value="hii">HII (High-High Alarm)</option>
+                      <option value="lolo">LOLO (Low-Low Alarm)</option>
+                    </select>
+                  </div>
+
+                  {['hi', 'hii'].includes(newRuleCondition) && (
+                    <div className="form-group">
+                      <label htmlFor="rule-threshold-hi">High Threshold Value</label>
+                      <input
+                        id="rule-threshold-hi"
+                        type="number"
+                        value={newRuleThresholdHi}
+                        onChange={(e) => setNewRuleThresholdHi(e.target.value)}
+                        placeholder={`Enter ${newRuleCondition.toUpperCase()} threshold`}
+                      />
+                    </div>
+                  )}
+
+                  {['lo', 'lolo'].includes(newRuleCondition) && (
+                    <div className="form-group">
+                      <label htmlFor="rule-threshold-lo">Low Threshold Value</label>
+                      <input
+                        id="rule-threshold-lo"
+                        type="number"
+                        value={newRuleThresholdLo}
+                        onChange={(e) => setNewRuleThresholdLo(e.target.value)}
+                        placeholder={`Enter ${newRuleCondition.toUpperCase()} threshold`}
+                      />
+                    </div>
+                  )}
+
+                  <div className="modal-actions">
+                    <button
+                      className="button secondary"
+                      onClick={() => setShowRuleModal(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="button primary"
+                      disabled={!newRuleThresholdHi && !newRuleThresholdLo}
+                      onClick={createRule}
+                    >
+                      Create Rule
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Create Group Modal */}
+      {showCreateModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>Create New Alarm Group</h3>
+            
+            <div className="form-group">
+              <label htmlFor="group-name">Group Name *</label>
+              <input
+                id="group-name"
+                type="text"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                placeholder="Enter group name (e.g., 'Pump Station 1-3')"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="group-description">Description</label>
+              <textarea
+                id="group-description"
+                value={newGroupDescription}
+                onChange={(e) => setNewGroupDescription(e.target.value)}
+                placeholder="Optional description of what this group monitors"
+                rows={3}
+              />
+            </div>
+
+            <p className="form-help">
+              After creating the group, you'll add registers from different devices and configure Hi/Lo/HIHI/LOLO alarm thresholds.
+            </p>
+
+            <div className="modal-actions">
+              <button
+                className="button secondary"
+                onClick={() => setShowCreateModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button primary"
+                disabled={!newGroupName.trim()}
+                onClick={createGroup}
+              >
+                Create Group
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AlarmsView({
+  canAcknowledge,
+  canConfigure,
+  connected,
+  onRefresh,
+  onToast,
+  systemItems,
+  tagItems,
+  token,
+}: {
+  canAcknowledge: boolean;
+  canConfigure: boolean;
+  connected: boolean;
+  onRefresh: () => Promise<void>;
+  onToast: (text: string) => void;
+  systemItems: ApiSystemAlert[];
+  tagItems: ApiAlarm[];
+  token?: string;
+}) {
+  const [busy, setBusy] = useState("");
+  const activeSystemItems = systemItems.filter(
+    (item) => item.state === "active" && !item.resolvedAt,
+  );
+  const unacknowledgedSystemItems = activeSystemItems.filter(
+    (item) => !item.acknowledgedAt,
+  );
+  const unacknowledgedTagItems = tagItems.filter(
+    (item) => !item.acknowledgedAt,
+  );
+  const deviceOfflineCount = activeSystemItems.filter(
+    (item) => item.type === "device_offline",
+  ).length;
+  const postgresOfflineCount = activeSystemItems.filter(
+    (item) => item.type === "postgres_offline",
+  ).length;
+  const recentResolvedItems = systemItems
+    .filter((item) => item.state === "resolved" || Boolean(item.resolvedAt))
+    .sort(
+      (left, right) =>
+        new Date(right.resolvedAt ?? right.lastObservedAt).getTime() -
+        new Date(left.resolvedAt ?? left.lastObservedAt).getTime(),
+    )
+    .slice(0, 8);
+
+  async function refreshVisible() {
+    setBusy("refresh");
+    try {
+      await onRefresh();
+      onToast("Alerts refreshed");
+    } catch {
+      onToast("Alerts could not be refreshed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function acknowledgeSystem(item: ApiSystemAlert) {
+    setBusy(`system:${item.id}`);
+    try {
+      await acknowledgeSystemAlert(item.id, token);
+      await onRefresh();
+      onToast(`${item.sourceName} alert acknowledged`);
+    } catch (requestError) {
+      onToast(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Alert acknowledgement failed",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function acknowledgeTag(item: ApiAlarm) {
+    setBusy(`tag:${item.id}`);
+    try {
+      await acknowledgeAlarm(item.id, token);
+      await onRefresh();
+      onToast(`${item.ruleName} acknowledged`);
+    } catch (requestError) {
+      onToast(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Tag alarm acknowledgement failed",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function acknowledgeVisible() {
+    const work = [
+      ...unacknowledgedSystemItems.map((item) =>
+        acknowledgeSystemAlert(item.id, token),
+      ),
+      ...unacknowledgedTagItems.map((item) => acknowledgeAlarm(item.id, token)),
+    ];
+    if (work.length === 0) return;
+    setBusy("all");
+    try {
+      await Promise.all(work);
+      await onRefresh();
+      onToast("All visible alerts acknowledged");
+    } catch (requestError) {
+      onToast(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Alert acknowledgement failed",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Infrastructure alerting"
+        title="Alerts"
+        copy="See device and remote database outages on the dashboard, acknowledge incidents, and deliver approved notifications through WhatsApp."
+      >
+        <button
+          className="button secondary"
+          disabled={!connected || Boolean(busy)}
+          onClick={() => void refreshVisible()}
+          type="button"
+        >
+          <RefreshCw
+            className={busy === "refresh" ? "spin-icon" : undefined}
+            size={14}
+          />
+          Refresh
+        </button>
+        {canAcknowledge ? (
+          <button
+            className="button primary"
+            disabled={
+              !connected ||
+              Boolean(busy) ||
+              unacknowledgedSystemItems.length +
+                unacknowledgedTagItems.length ===
+                0
+            }
+            onClick={() => void acknowledgeVisible()}
+            type="button"
+          >
+            <Check size={14} />
+            {busy === "all" ? "Acknowledging…" : "Acknowledge all"}
+          </button>
+        ) : null}
+      </SectionIntro>
+
+      <div className="alert-summary-grid" aria-label="Active alert summary">
+        <div className="alert-summary-card">
+          <span className="alarm-icon critical">
+            <AlertTriangle size={14} />
+          </span>
+          <div>
+            <strong>{activeSystemItems.length}</strong>
+            <span>Active system alerts</span>
+          </div>
+        </div>
+        <div className="alert-summary-card">
+          <span className="alarm-icon critical">
+            <Cable size={14} />
+          </span>
+          <div>
+            <strong>{deviceOfflineCount}</strong>
+            <span>Devices offline</span>
+          </div>
+        </div>
+        <div className="alert-summary-card">
+          <span className="alarm-icon critical">
+            <Database size={14} />
+          </span>
+          <div>
+            <strong>{postgresOfflineCount}</strong>
+            <span>Databases offline</span>
+          </div>
+        </div>
+      </div>
+
+      <section className="panel system-alert-panel">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>System alerts</h3>
+            <p>
+              Device communication and remote PostgreSQL availability ·
+              refreshed every 15 seconds
+            </p>
+          </div>
+          <span
+            className={`status-pill ${
+              activeSystemItems.length > 0 ? "critical" : "online"
+            }`}
+          >
+            {activeSystemItems.length > 0
+              ? `${activeSystemItems.length} active`
+              : "Normal"}
+          </span>
+        </div>
+        <div className="system-alert-stack" aria-live="polite">
+          {activeSystemItems.map((item) => (
+            <article
+              className={`system-alert-row${
+                item.acknowledgedAt ? " acknowledged" : ""
+              }`}
+              key={item.id}
+            >
+              <span className="alarm-icon critical">
+                {item.type === "device_offline" ? (
+                  <Cable size={14} />
+                ) : (
+                  <Database size={14} />
+                )}
+              </span>
+              <div className="system-alert-content">
+                <div className="system-alert-title">
+                  <h4>{item.sourceName}</h4>
+                  <span className="tag">{systemAlertTypeLabel(item.type)}</span>
+                </div>
+                <p>{item.detail}</p>
+                <div className="system-alert-meta">
+                  <span>Opened {new Date(item.openedAt).toLocaleString()}</span>
+                  <span>
+                    Last observed{" "}
+                    {new Date(item.lastObservedAt).toLocaleString()}
+                  </span>
+                  <span
+                    className={`alert-delivery-status ${item.deliveryStatus}`}
+                  >
+                    {whatsappDeliveryLabel(item.deliveryStatus)}
+                  </span>
+                  {item.acknowledgedAt ? (
+                    <span>
+                      Acknowledged
+                      {item.acknowledgedBy ? ` by ${item.acknowledgedBy}` : ""}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              {canAcknowledge ? (
+                <button
+                  className="button secondary alert-ack-button"
+                  disabled={Boolean(item.acknowledgedAt) || Boolean(busy)}
+                  onClick={() => void acknowledgeSystem(item)}
+                  type="button"
+                >
+                  <Check size={13} />
+                  {item.acknowledgedAt
+                    ? "Acknowledged"
+                    : busy === `system:${item.id}`
+                      ? "Saving…"
+                      : "Acknowledge"}
+                </button>
+              ) : null}
+            </article>
+          ))}
+          {!connected ? (
+            <div className="empty-state compact-empty-state">
+              <div>
+                <span className="empty-state-icon">
+                  <WifiOff size={21} />
+                </span>
+                <h3>Collector unavailable</h3>
+                <p>System alerts will appear after the collector reconnects.</p>
+              </div>
+            </div>
+          ) : null}
+          {connected && activeSystemItems.length === 0 ? (
+            <div className="empty-state compact-empty-state">
+              <div>
+                <span className="empty-state-icon">
+                  <Check size={21} />
+                </span>
+                <h3>No active system alerts</h3>
+                <p>All monitored devices and remote databases are online.</p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {recentResolvedItems.length > 0 ? (
+        <section className="panel alert-section-panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Recent resolved incidents</h3>
+              <p>Latest recoveries retained for operational review</p>
+            </div>
+            <span className="status-pill online">Recovered</span>
+          </div>
+          <div className="system-alert-stack">
+            {recentResolvedItems.map((item) => (
+              <article
+                className="system-alert-row resolved-alert-row"
+                key={item.id}
+              >
+                <span className="alarm-icon resolved">
+                  <Check size={14} />
+                </span>
+                <div className="system-alert-content">
+                  <div className="system-alert-title">
+                    <h4>{item.sourceName}</h4>
+                    <span className="tag">
+                      {systemAlertTypeLabel(item.type)}
+                    </span>
+                  </div>
+                  <p>{item.detail}</p>
+                  <div className="system-alert-meta">
+                    <span>
+                      Opened {new Date(item.openedAt).toLocaleString()}
+                    </span>
+                    <span>
+                      Resolved{" "}
+                      {new Date(
+                        item.resolvedAt ?? item.lastObservedAt,
+                      ).toLocaleString()}
+                    </span>
+                    <span
+                      className={`alert-delivery-status ${item.deliveryStatus}`}
+                    >
+                      {whatsappDeliveryLabel(item.deliveryStatus)}
+                    </span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {canConfigure ? (
+        <WhatsAppAlertSettings
+          connected={connected}
+          onToast={onToast}
+          token={token}
+        />
+      ) : (
+        <section className="panel alert-section-panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>WhatsApp delivery</h3>
+              <p>Configured by an administrator</p>
+            </div>
+            <ShieldCheck size={17} color="#086c58" />
+          </div>
+          <p className="alert-permission-note">
+            Your account can view alert delivery status. Administrator access is
+            required to view or change WhatsApp credentials and recipients.
+          </p>
+        </section>
+      )}
+
+      <section className="panel alert-section-panel">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>Tag value alerts</h3>
+            <p>
+              Existing threshold alarms remain on the dashboard. WhatsApp
+              delivery for tag values will be added later.
+            </p>
+          </div>
+          <span className="tag">
+            {tagItems.length > 0
+              ? `${tagItems.length} active`
+              : "No active tag alarms"}
+          </span>
+        </div>
+        <div className="alarm-stack">
+          {tagItems.map((item) => (
+            <div className="alarm-row tag-alarm-row" key={item.id}>
+              <span className={`alarm-icon ${item.severity}`}>
+                {item.severity === "critical" ? (
+                  <Zap size={14} />
+                ) : (
+                  <Thermometer size={14} />
+                )}
+              </span>
+              <div className="alarm-info">
+                <h4>{item.ruleName}</h4>
+                <p>
+                  {item.deviceName} · {item.tagName} · {item.message}
+                </p>
+              </div>
+              <span className="alarm-time">
+                {new Date(item.openedAt).toLocaleString()}
+              </span>
+              {canAcknowledge ? (
+                <button
+                  className="button secondary alert-ack-button"
+                  disabled={Boolean(item.acknowledgedAt) || Boolean(busy)}
+                  onClick={() => void acknowledgeTag(item)}
+                  type="button"
+                >
+                  <Check size={13} />
+                  {item.acknowledgedAt
+                    ? "Acknowledged"
+                    : busy === `tag:${item.id}`
+                      ? "Saving…"
+                      : "Acknowledge"}
+                </button>
+              ) : null}
+            </div>
+          ))}
+          {tagItems.length === 0 ? (
+            <div className="empty-state compact-empty-state">
+              <div>
+                <span className="empty-state-icon future-alert-icon">
+                  <Thermometer size={21} />
+                </span>
+                <h3>No active tag alarms</h3>
+                <p>
+                  Existing tag threshold alarms will appear here. WhatsApp
+                  delivery for tag values will be added in a later phase.
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ReportsView({
+  connected,
+  onToast,
+  token,
+}: {
+  connected: boolean;
+  onToast: (text: string) => void;
+  token?: string;
+}) {
+  const [reportDevices, setReportDevices] = useState<ApiDevice[]>([]);
+  const [classifications, setClassifications] =
+    useState<ApiDeviceClassifications>(emptyDeviceClassifications);
+  const [categoryId, setCategoryId] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [loading, setLoading] = useState(connected);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    Promise.all([fetchDevices(token), fetchDeviceClassifications(token)])
+      .then(([deviceResponse, classificationResponse]) => {
+        if (!active) return;
+        setReportDevices(deviceResponse);
+        setClassifications(classificationResponse);
+        setError("");
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setError(
+          requestError instanceof ApiError
+            ? requestError.message
+            : "Report devices and classifications could not be loaded.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [connected, token]);
+
+  const matchingDevices = reportDevices.filter(
+    (device) =>
+      (!categoryId || device.categoryId === categoryId) &&
+      (!groupId || device.groupId === groupId),
+  );
+  const filtersActive = Boolean(categoryId || groupId);
+
+  async function exportReport() {
+    setExporting(true);
+    setError("");
+    try {
+      await downloadReadings(token, {
+        ...(categoryId ? { categoryId } : {}),
+        ...(groupId ? { groupId } : {}),
+      });
+      onToast(
+        `CSV report downloaded for ${matchingDevices.length} ${
+          matchingDevices.length === 1 ? "device" : "devices"
+        }`,
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "The filtered CSV report could not be downloaded.",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Report scope"
+        title="Reports & export"
+        copy="Use predefined categories and groups to select a consistent set of devices for every production report."
+      >
+        <button
+          className="button primary"
+          disabled={
+            !connected || loading || exporting || matchingDevices.length === 0
+          }
+          onClick={() => void exportReport()}
+          type="button"
+        >
+          <Download size={14} />
+          {exporting ? "Preparing CSV…" : "Export report CSV"}
+        </button>
+      </SectionIntro>
+
+      {error ? (
+        <p className="login-error postgres-page-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      <section className="panel report-filter-panel">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>Choose report devices</h3>
+            <p>Category and group filters work together.</p>
+          </div>
+          <FileChartColumn size={17} color="#086c58" />
+        </div>
+        <div className="report-filter-grid">
+          <div className="form-group">
+            <label htmlFor="report-category">Category</label>
+            <select
+              className="form-control"
+              disabled={loading}
+              id="report-category"
+              onChange={(event) => setCategoryId(event.target.value)}
+              value={categoryId}
+            >
+              <option value="">All categories</option>
+              {classifications.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name} · {category.deviceCount}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="report-group">Group</label>
+            <select
+              className="form-control"
+              disabled={loading}
+              id="report-group"
+              onChange={(event) => setGroupId(event.target.value)}
+              value={groupId}
+            >
+              <option value="">All groups</option>
+              {classifications.groups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name} · {group.deviceCount}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="report-scope-summary" aria-live="polite">
+            <div>
+              <strong>
+                {loading
+                  ? "Loading report scope…"
+                  : `${matchingDevices.length} matching ${
+                      matchingDevices.length === 1 ? "device" : "devices"
+                    }`}
+              </strong>
+              <span>
+                {classifications.categories.length === 0 &&
+                classifications.groups.length === 0
+                  ? "Add categories and groups in Settings to create reusable report scopes."
+                  : filtersActive
+                    ? "Only the devices listed below will be included."
+                    : "No classification filter is applied."}
+              </span>
+            </div>
+            <button
+              className="button secondary"
+              disabled={!filtersActive}
+              onClick={() => {
+                setCategoryId("");
+                setGroupId("");
+              }}
+              type="button"
+            >
+              Clear filters
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel table-panel report-device-table">
+        {loading ? (
+          <div className="empty-state compact-empty-state">
+            <div>
+              <span className="empty-state-icon">
+                <RefreshCw className="spin-icon" size={21} />
+              </span>
+              <h3>Loading report devices</h3>
+              <p>Reading the latest category and group assignments.</p>
+            </div>
+          </div>
+        ) : !connected ? (
+          <div className="empty-state compact-empty-state">
+            <div>
+              <span className="empty-state-icon">
+                <ServerCog size={21} />
+              </span>
+              <h3>Collector unavailable</h3>
+              <p>Start the collector to load devices for this report.</p>
+            </div>
+          </div>
+        ) : reportDevices.length === 0 ? (
+          <div className="empty-state compact-empty-state">
+            <div>
+              <span className="empty-state-icon">
+                <Network size={21} />
+              </span>
+              <h3>No devices to report</h3>
+              <p>Add a device, then assign its optional category and group.</p>
+            </div>
+          </div>
+        ) : matchingDevices.length === 0 ? (
+          <div className="empty-state compact-empty-state">
+            <div>
+              <span className="empty-state-icon">
+                <Search size={21} />
+              </span>
+              <h3>No devices match both filters</h3>
+              <p>Clear one filter or update device assignments in Devices.</p>
+              <button
+                className="button secondary"
+                onClick={() => {
+                  setCategoryId("");
+                  setGroupId("");
+                }}
+                type="button"
+              >
+                Show all devices
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Device</th>
+                  <th>Category</th>
+                  <th>Group</th>
+                  <th>Protocol</th>
+                  <th>Tags</th>
+                  <th>Save interval</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matchingDevices.map((device) => (
+                  <tr key={device.id}>
+                    <td className="table-primary">{device.name}</td>
+                    <td>{device.categoryName ?? "Unassigned"}</td>
+                    <td>{device.groupName ?? "Unassigned"}</td>
+                    <td>
+                      {device.protocol === "tcp" ? "Modbus TCP" : "Modbus RTU"}
+                    </td>
+                    <td>{device.tagCount}</td>
+                    <td>{formatSaveInterval(device.saveIntervalMs)}</td>
+                    <td>
+                      <StatusPill
+                        status={
+                          device.status === "disabled"
+                            ? "offline"
+                            : device.status
+                        }
+                      >
+                        {device.status}
+                      </StatusPill>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function PostgresSettingsView({
+  canConfigure,
+  connected,
+  onToast,
+  token,
+}: {
+  canConfigure: boolean;
+  connected: boolean;
+  onToast: (text: string) => void;
+  token?: string;
+}) {
+  const [settings, setSettings] = useState(defaultPostgresSettings);
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(connected && canConfigure);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [maintaining, setMaintaining] = useState(false);
+  const [replaying, setReplaying] = useState(false);
+  const [error, setError] = useState("");
+  const [testResult, setTestResult] =
+    useState<PostgresConnectionTestResult | null>(null);
+
+  useEffect(() => {
+    if (!connected || !canConfigure) {
+      return;
+    }
+    let active = true;
+    fetchPostgresSettings(token)
+      .then((response) => {
+        if (active) setSettings(response);
+      })
+      .catch((requestError) => {
+        if (active) {
+          setError(
+            requestError instanceof ApiError
+              ? requestError.message
+              : "Remote PostgreSQL settings could not be loaded.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canConfigure, connected, token]);
+
+  function updateSettings(patch: Partial<ApiPostgresSettings>) {
+    setSettings((current) => ({ ...current, ...patch }));
+  }
+
+  function payload(): PostgresSettingsPayload {
+    return {
+      enabled: settings.enabled,
+      host: settings.host.trim(),
+      port: settings.port,
+      database: settings.database.trim(),
+      username: settings.username.trim(),
+      ...(password ? { password } : {}),
+      sslMode: settings.sslMode,
+      autoDownsampleEnabled: settings.autoDownsampleEnabled,
+      defaultRawTable: settings.defaultRawTable.trim(),
+      defaultDownsampleTable: settings.defaultDownsampleTable.trim(),
+      defaultDownsampleIntervalSec: settings.defaultDownsampleIntervalSec,
+      rawRetentionDays: settings.rawRetentionDays,
+      downsampleRetentionDays: settings.downsampleRetentionDays,
+      maintenanceIntervalHours: settings.maintenanceIntervalHours,
+      historianTimezone: settings.historianTimezone,
+      offlineCacheEnabled: settings.offlineCacheEnabled,
+      offlineCacheMaxRows: settings.offlineCacheMaxRows,
+    };
+  }
+
+  async function testConnection() {
+    if (!canConfigure) return;
+    setTesting(true);
+    setError("");
+    setTestResult(null);
+    try {
+      const result = await testPostgresConnection(payload(), token);
+      setTestResult(result);
+      onToast(
+        result.ok
+          ? "Remote PostgreSQL connection verified"
+          : "PostgreSQL connection needs attention",
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Connection test could not be completed.",
+      );
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function saveSettings() {
+    if (!canConfigure) return;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await savePostgresSettings(payload(), token);
+      setSettings(response);
+      setPassword("");
+      setTestResult(null);
+      onToast(
+        response.enabled
+          ? "Remote PostgreSQL settings saved and applied"
+          : "Remote PostgreSQL logging paused",
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Remote PostgreSQL settings could not be saved.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runMaintenance() {
+    if (!canConfigure) return;
+    setMaintaining(true);
+    setError("");
+    try {
+      const result = await runPostgresMaintenance(token);
+      const refreshed = await fetchPostgresSettings(token);
+      setSettings(refreshed);
+      onToast(
+        result.skipped
+          ? result.message
+          : `Cleanup complete · ${formatInteger(
+              result.rawDeleted + result.downsampleDeleted,
+            )} rows removed`,
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "PostgreSQL cleanup could not be completed.",
+      );
+    } finally {
+      setMaintaining(false);
+    }
+  }
+
+  async function replayOfflineCache() {
+    if (!canConfigure) return;
+    setReplaying(true);
+    setError("");
+    try {
+      const result = await replayPostgresOfflineCache(token);
+      setSettings(await fetchPostgresSettings(token));
+      onToast(
+        result.message ||
+          `Offline replay complete · ${formatInteger(
+            result.replayedRows,
+          )} of ${formatInteger(result.queuedRows)} rows replayed · ${formatInteger(
+            result.remainingRows,
+          )} remaining`,
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Queued rows could not be replayed.",
+      );
+    } finally {
+      setReplaying(false);
+    }
+  }
+
+  const databaseIdentifier = `"${(
+    settings.database || "modbus_logger"
+  ).replaceAll('"', '""')}"`;
+  const usernameIdentifier = `"${(settings.username || "logger").replaceAll(
+    '"',
+    '""',
+  )}"`;
+  const setupSql = `CREATE DATABASE ${databaseIdentifier};
+CREATE USER ${usernameIdentifier} WITH PASSWORD 'replace-this-password';
+
+-- Connect to the new database, then run:
+GRANT CONNECT ON DATABASE ${databaseIdentifier} TO ${usernameIdentifier};
+GRANT USAGE, CREATE ON SCHEMA public TO ${usernameIdentifier};`;
+  const timescaleSql = `-- Run as a database administrator in ${settings.database || "modbus_logger"}
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+-- Run after the logger creates each device table:
+SELECT create_hypertable(
+  'your_device_raw',
+  by_range('timestamp'),
+  if_not_exists => TRUE,
+  migrate_data => TRUE
+);`;
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Remote historian"
+        title="Remote PostgreSQL"
+        copy="Connect this collector to a remote PostgreSQL server, control automatic downsampling, and remove expired history on a schedule."
+      >
+        <button
+          className="button secondary"
+          disabled={testing || loading || !canConfigure}
+          onClick={() => void testConnection()}
+          type="button"
+          title={
+            canConfigure
+              ? "Verify the remote PostgreSQL connection"
+              : "Administrator access is required"
+          }
+        >
+          <Play size={14} />
+          {testing ? "Testing…" : "Test connection"}
+        </button>
+        <button
+          className="button primary"
+          disabled={saving || loading || !canConfigure}
+          onClick={() => void saveSettings()}
+          type="button"
+          title={
+            canConfigure
+              ? "Save and apply PostgreSQL settings"
+              : "Administrator access is required"
+          }
+        >
+          <Save size={14} />
+          {saving ? "Saving…" : "Save & apply"}
+        </button>
+      </SectionIntro>
+
+      {error ? (
+        <p className="login-error postgres-page-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      {!canConfigure ? (
+        <p className="permission-banner">
+          Remote historian status is read-only. Administrator access is required
+          to test, change, replay, or maintain PostgreSQL.
+        </p>
+      ) : null}
+
+      {canConfigure ? (
+        <fieldset className="page-fieldset" disabled={loading}>
+          <div className="postgres-settings-layout">
+            <div className="postgres-settings-main">
+              <section className="panel">
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <h3>Remote server connection</h3>
+                    <p>
+                      Passwords are encrypted by the collector and never
+                      returned to this page.
+                    </p>
+                  </div>
+                  <label className="switch-label" htmlFor="remote-pg-enabled">
+                    <input
+                      checked={settings.enabled}
+                      id="remote-pg-enabled"
+                      onChange={(event) =>
+                        updateSettings({ enabled: event.target.checked })
+                      }
+                      type="checkbox"
+                    />
+                    Enable
+                  </label>
+                </div>
+                <div className="form-grid postgres-connection-form">
+                  <div className="form-group full">
+                    <label htmlFor="postgres-host">
+                      Server hostname or IP address
+                    </label>
+                    <input
+                      className="form-control mono"
+                      id="postgres-host"
+                      onChange={(event) =>
+                        updateSettings({ host: event.target.value })
+                      }
+                      placeholder="db.example.local"
+                      value={settings.host}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="postgres-port">Port</label>
+                    <input
+                      className="form-control"
+                      id="postgres-port"
+                      max="65535"
+                      min="1"
+                      onChange={(event) =>
+                        updateSettings({ port: Number(event.target.value) })
+                      }
+                      type="number"
+                      value={settings.port}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="postgres-database">Database</label>
+                    <input
+                      className="form-control mono"
+                      id="postgres-database"
+                      onChange={(event) =>
+                        updateSettings({ database: event.target.value })
+                      }
+                      pattern="[A-Za-z_][A-Za-z0-9_]{0,62}"
+                      value={settings.database}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="postgres-username">Username</label>
+                    <input
+                      autoComplete="username"
+                      className="form-control mono"
+                      id="postgres-username"
+                      onChange={(event) =>
+                        updateSettings({ username: event.target.value })
+                      }
+                      pattern="[A-Za-z_][A-Za-z0-9_]{0,62}"
+                      value={settings.username}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="postgres-password">Password</label>
+                    <input
+                      autoComplete="new-password"
+                      className="form-control"
+                      id="postgres-password"
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder={
+                        settings.passwordConfigured
+                          ? "Saved password · leave blank to keep"
+                          : "Enter database password"
+                      }
+                      type="password"
+                      value={password}
+                    />
+                  </div>
+                  <div className="form-group full">
+                    <label htmlFor="postgres-ssl">TLS / SSL mode</label>
+                    <select
+                      className="form-control"
+                      id="postgres-ssl"
+                      onChange={(event) =>
+                        updateSettings({
+                          sslMode: event.target
+                            .value as ApiPostgresSettings["sslMode"],
+                        })
+                      }
+                      value={settings.sslMode}
+                    >
+                      <option value="verify-full">
+                        Verify certificate · recommended
+                      </option>
+                      <option value="require">
+                        Encrypted, no certificate check
+                      </option>
+                      <option value="disable">
+                        No TLS · private test network only
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <h3>New-device downsampling defaults</h3>
+                    <p>
+                      Prefill new devices; every device can customize these
+                      values.
+                    </p>
+                  </div>
+                  <label
+                    className="switch-label"
+                    htmlFor="auto-downsample-enabled"
+                  >
+                    <input
+                      checked={settings.autoDownsampleEnabled}
+                      id="auto-downsample-enabled"
+                      onChange={(event) =>
+                        updateSettings({
+                          autoDownsampleEnabled: event.target.checked,
+                        })
+                      }
+                      type="checkbox"
+                    />
+                    Default on
+                  </label>
+                </div>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label htmlFor="postgres-raw-table">
+                      Default raw table
+                    </label>
+                    <input
+                      className="form-control mono"
+                      id="postgres-raw-table"
+                      onChange={(event) =>
+                        updateSettings({
+                          defaultRawTable: event.target.value,
+                        })
+                      }
+                      pattern="[a-z][a-z0-9_]{0,62}"
+                      value={settings.defaultRawTable}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="postgres-downsample-table">
+                      Default downsample table
+                    </label>
+                    <input
+                      className="form-control mono"
+                      id="postgres-downsample-table"
+                      onChange={(event) =>
+                        updateSettings({
+                          defaultDownsampleTable: event.target.value,
+                        })
+                      }
+                      pattern="[a-z][a-z0-9_]{0,62}"
+                      value={settings.defaultDownsampleTable}
+                    />
+                  </div>
+                  <div className="form-group full">
+                    <label htmlFor="postgres-bucket">
+                      Default downsample interval
+                    </label>
+                    <select
+                      className="form-control"
+                      id="postgres-bucket"
+                      onChange={(event) =>
+                        updateSettings({
+                          defaultDownsampleIntervalSec: Number(
+                            event.target.value,
+                          ),
+                        })
+                      }
+                      value={settings.defaultDownsampleIntervalSec}
+                    >
+                      <option value="10">10 seconds</option>
+                      <option value="60">1 minute</option>
+                      <option value="300">5 minutes</option>
+                      <option value="900">15 minutes</option>
+                      <option value="3600">1 hour</option>
+                      <option value="86400">1 day</option>
+                    </select>
+                    <p className="form-help">
+                      Each interval stores the last good value for every tag in
+                      one wide timestamp row. For example, 15 minutes creates
+                      one row per 15-minute interval. Each device can override
+                      this default.
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <h3>New-device retention defaults</h3>
+                    <p>
+                      Prefill new devices; cleanup still follows each
+                      device&apos;s own schedule.
+                    </p>
+                  </div>
+                  <Trash2 size={17} color="#086c58" />
+                </div>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label htmlFor="raw-retention-days">
+                      Keep raw data for (days)
+                    </label>
+                    <input
+                      className="form-control"
+                      id="raw-retention-days"
+                      max="36500"
+                      min="0"
+                      onChange={(event) =>
+                        updateSettings({
+                          rawRetentionDays: Number(event.target.value),
+                        })
+                      }
+                      type="number"
+                      value={settings.rawRetentionDays}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="downsample-retention-days">
+                      Keep downsampled data for (days)
+                    </label>
+                    <input
+                      className="form-control"
+                      id="downsample-retention-days"
+                      max="36500"
+                      min="0"
+                      onChange={(event) =>
+                        updateSettings({
+                          downsampleRetentionDays: Number(event.target.value),
+                        })
+                      }
+                      type="number"
+                      value={settings.downsampleRetentionDays}
+                    />
+                  </div>
+                  <div className="form-group full">
+                    <label htmlFor="maintenance-frequency">
+                      Cleanup frequency
+                    </label>
+                    <select
+                      className="form-control"
+                      id="maintenance-frequency"
+                      onChange={(event) =>
+                        updateSettings({
+                          maintenanceIntervalHours: Number(event.target.value),
+                        })
+                      }
+                      value={settings.maintenanceIntervalHours}
+                    >
+                      <option value="1">Every hour</option>
+                      <option value="6">Every 6 hours</option>
+                      <option value="12">Every 12 hours</option>
+                      <option value="24">Once per day</option>
+                      <option value="48">Every 2 days</option>
+                      <option value="168">Once per week</option>
+                    </select>
+                    <p className="form-help">
+                      Enter 0 retention days to keep that table indefinitely.
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <h3>Offline write cache</h3>
+                    <p>
+                      Keep completed historian rows locally while the remote
+                      server is unavailable, then replay them in order.
+                    </p>
+                  </div>
+                  <label
+                    className="switch-label"
+                    htmlFor="offline-cache-enabled"
+                  >
+                    <input
+                      checked={settings.offlineCacheEnabled}
+                      id="offline-cache-enabled"
+                      onChange={(event) =>
+                        updateSettings({
+                          offlineCacheEnabled: event.target.checked,
+                        })
+                      }
+                      type="checkbox"
+                    />
+                    Enable
+                  </label>
+                </div>
+                <div className="form-grid">
+                  <div className="form-group full">
+                    <label htmlFor="offline-cache-max-rows">
+                      Maximum queued rows
+                    </label>
+                    <input
+                      className="form-control"
+                      disabled={!settings.offlineCacheEnabled}
+                      id="offline-cache-max-rows"
+                      max="1000000"
+                      min="1000"
+                      onChange={(event) =>
+                        updateSettings({
+                          offlineCacheMaxRows: Number(event.target.value),
+                        })
+                      }
+                      step="1000"
+                      type="number"
+                      value={settings.offlineCacheMaxRows}
+                    />
+                    <p className="form-help">
+                      Size this for the longest expected outage. The collector
+                      reports queued and oldest-row status before this limit is
+                      reached.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <aside className="postgres-settings-side">
+              <section className="panel postgres-status-card">
+                <div className="panel-header">
+                  <div className="panel-title">
+                    <h3>Historian status</h3>
+                    <p>
+                      {settings.source === "environment"
+                        ? "Loaded from collector environment"
+                        : settings.source === "saved"
+                          ? "Saved in this logger"
+                          : "Not configured"}
+                    </p>
+                  </div>
+                  <span
+                    className={`postgres-status-light${
+                      settings.configured ? " online" : ""
+                    }`}
+                  />
+                </div>
+                <div className="postgres-status-body">
+                  <div className="postgres-status-summary">
+                    <Cloud size={19} />
+                    <div>
+                      <strong>
+                        {settings.configured
+                          ? "Remote historian ready"
+                          : "Setup required"}
+                      </strong>
+                      <span>
+                        {settings.host
+                          ? `${settings.host}:${settings.port}`
+                          : "Enter the server connection"}
+                      </span>
+                    </div>
+                  </div>
+                  <dl className="postgres-facts">
+                    <div>
+                      <dt>Last connection test</dt>
+                      <dd>{formatDateTime(settings.lastConnectionTestAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Last automatic cleanup</dt>
+                      <dd>{formatDateTime(settings.lastMaintenanceAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Rows removed last run</dt>
+                      <dd>
+                        {formatInteger(
+                          settings.lastMaintenanceRawDeleted +
+                            settings.lastMaintenanceDownsampleDeleted,
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Offline rows queued</dt>
+                      <dd>{formatInteger(settings.offlineCacheQueuedRows)}</dd>
+                    </div>
+                    <div>
+                      <dt>Oldest queued row</dt>
+                      <dd>{formatDateTime(settings.offlineCacheOldestAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Last queue replay</dt>
+                      <dd>{formatDateTime(settings.lastReplayAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Rows replayed last run</dt>
+                      <dd>{formatInteger(settings.lastReplayCount)}</dd>
+                    </div>
+                  </dl>
+                  <button
+                    className="button secondary postgres-maintenance-button"
+                    disabled={!settings.configured || maintaining}
+                    onClick={() => void runMaintenance()}
+                    type="button"
+                  >
+                    <Trash2 size={13} />
+                    {maintaining ? "Running cleanup…" : "Run cleanup now"}
+                  </button>
+                  <button
+                    className="button secondary postgres-maintenance-button"
+                    disabled={
+                      !settings.configured ||
+                      settings.offlineCacheQueuedRows === 0 ||
+                      replaying
+                    }
+                    onClick={() => void replayOfflineCache()}
+                    title={
+                      settings.offlineCacheQueuedRows === 0
+                        ? "No offline rows are waiting"
+                        : "Replay queued rows to the remote server"
+                    }
+                    type="button"
+                  >
+                    <RefreshCw
+                      className={replaying ? "spin-icon" : undefined}
+                      size={13}
+                    />
+                    {replaying ? "Replaying queue…" : "Replay queued rows"}
+                  </button>
+                </div>
+              </section>
+
+              {testResult ? (
+                <section
+                  className={`panel postgres-test-result ${
+                    testResult.ok ? "success" : "failed"
+                  }`}
+                >
+                  <strong>
+                    {testResult.ok ? "Connection passed" : "Connection failed"}
+                  </strong>
+                  <p>{testResult.message}</p>
+                  {testResult.serverVersion ? (
+                    <span>
+                      PostgreSQL {testResult.serverVersion} ·{" "}
+                      {testResult.database}
+                    </span>
+                  ) : null}
+                </section>
+              ) : null}
+            </aside>
+          </div>
+        </fieldset>
+      ) : null}
+
+      <section className="panel postgres-instructions">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>PostgreSQL server setup instructions</h3>
+            <p>Complete these steps on the remote database server once.</p>
+          </div>
+          <button
+            className="button secondary"
+            onClick={() => {
+              void navigator.clipboard.writeText(setupSql);
+              onToast("PostgreSQL setup commands copied");
+            }}
+            type="button"
+          >
+            <Copy size={13} />
+            Copy SQL
+          </button>
+        </div>
+        <div className="postgres-instruction-grid">
+          <ol className="postgres-steps">
+            <li>
+              <strong>Create a dedicated database and login.</strong>
+              <span>Do not use a PostgreSQL superuser for the logger.</span>
+            </li>
+            <li>
+              <strong>Allow the collector through the firewall.</strong>
+              <span>
+                Open TCP 5432 only from this logger computer&apos;s IP address.
+              </span>
+            </li>
+            <li>
+              <strong>Require SCRAM password authentication and TLS.</strong>
+              <span>
+                Add a hostssl rule for the collector IP in pg_hba.conf, then
+                reload PostgreSQL.
+              </span>
+            </li>
+            <li>
+              <strong>Test before saving.</strong>
+              <span>
+                The test checks CONNECT, schema USAGE, and table CREATE
+                permissions.
+              </span>
+            </li>
+          </ol>
+          <pre className="postgres-sql">
+            <code>{setupSql}</code>
+          </pre>
+        </div>
+        <p className="postgres-instruction-note">
+          Retention deletes old historian rows; it is not a backup. Keep regular
+          PostgreSQL backups and test restoring them.
+        </p>
+      </section>
+
+      <section className="panel postgres-instructions timescale-instructions">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>Optional TimescaleDB server setup</h3>
+            <p>
+              Use TimescaleDB hypertables for larger installations while this
+              logger continues to control each device&apos;s save, downsampling,
+              and retention schedule.
+            </p>
+          </div>
+          <button
+            className="button secondary"
+            onClick={() => {
+              void navigator.clipboard.writeText(timescaleSql);
+              onToast("TimescaleDB setup template copied");
+            }}
+            type="button"
+          >
+            <Copy size={13} />
+            Copy template
+          </button>
+        </div>
+        <div className="postgres-instruction-grid">
+          <ol className="postgres-steps">
+            <li>
+              <strong>Install the matching TimescaleDB package.</strong>
+              <span>
+                Use the package for your PostgreSQL major version, run the
+                TimescaleDB tuning tool, and restart PostgreSQL.
+              </span>
+            </li>
+            <li>
+              <strong>Enable the extension in the logger database.</strong>
+              <span>
+                Connect as a database administrator and run CREATE EXTENSION
+                once in this database.
+              </span>
+            </li>
+            <li>
+              <strong>Let the logger create device tables first.</strong>
+              <span>
+                Then convert each device&apos;s raw table to a hypertable using
+                its timestamp column.
+              </span>
+            </li>
+            <li>
+              <strong>Keep one retention owner.</strong>
+              <span>
+                The logger already applies the per-device retention values.
+                Avoid a second TimescaleDB retention policy for the same table.
+              </span>
+            </li>
+          </ol>
+          <pre className="postgres-sql">
+            <code>{timescaleSql}</code>
+          </pre>
+        </div>
+        <p className="postgres-instruction-note">
+          TimescaleDB is optional. Standard PostgreSQL remains fully supported;
+          use the extension when data volume and long-term query performance
+          justify it.
+        </p>
+      </section>
+    </>
+  );
+}
+
+function DeviceClassificationEditor({
+  busyKey,
+  canConfigure,
+  draft,
+  items,
+  kind,
+  loading,
+  onCreate,
+  onDraftChange,
+  onRemove,
+}: {
+  busyKey: string;
+  canConfigure: boolean;
+  draft: string;
+  items: ApiDeviceClassification[];
+  kind: DeviceClassificationKind;
+  loading: boolean;
+  onCreate: () => Promise<void>;
+  onDraftChange: (value: string) => void;
+  onRemove: (item: ApiDeviceClassification) => Promise<void>;
+}) {
+  const singular = kind === "categories" ? "category" : "group";
+  const title = kind === "categories" ? "Categories" : "Groups";
+  const description =
+    kind === "categories"
+      ? "Describe the device purpose, such as Energy Meter or PLC."
+      : "Describe its reporting area, such as Utility Room or Production Line 1.";
+
+  return (
+    <div className="classification-editor">
+      <div className="classification-editor-heading">
+        <span className="classification-icon">
+          {kind === "categories" ? <Tags size={15} /> : <Network size={15} />}
+        </span>
+        <div>
+          <h4>{title}</h4>
+          <p>{description}</p>
+        </div>
+      </div>
+      <form
+        className="classification-create"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onCreate();
+        }}
+      >
+        <label className="sr-only" htmlFor={`new-${singular}`}>
+          New {singular} name
+        </label>
+        <input
+          className="form-control"
+          disabled={!canConfigure || busyKey !== ""}
+          id={`new-${singular}`}
+          maxLength={120}
+          onChange={(event) => onDraftChange(event.target.value)}
+          placeholder={`Add ${singular}`}
+          required
+          value={draft}
+        />
+        <button
+          className="button primary"
+          disabled={!canConfigure || !draft.trim() || busyKey !== ""}
+          type="submit"
+        >
+          <Plus size={13} />
+          Add
+        </button>
+      </form>
+      {!canConfigure ? (
+        <p className="classification-permission-note">
+          Administrator access is required to change this list.
+        </p>
+      ) : null}
+      <div className="classification-list" aria-live="polite">
+        {loading ? (
+          <p className="classification-empty">Loading {kind}…</p>
+        ) : items.length === 0 ? (
+          <p className="classification-empty">
+            No {kind} yet. Add one to make it available on every device form.
+          </p>
+        ) : (
+          items.map((item) => {
+            const inUse = item.deviceCount > 0;
+            const deleting = busyKey === `${kind}:${item.id}`;
+            return (
+              <div className="classification-item" key={item.id}>
+                <div>
+                  <strong>{item.name}</strong>
+                  <span>
+                    {inUse
+                      ? `Used by ${item.deviceCount} ${
+                          item.deviceCount === 1 ? "device" : "devices"
+                        }`
+                      : "Not assigned"}
+                  </span>
+                </div>
+                <button
+                  aria-label={`Remove ${singular} ${item.name}`}
+                  className="icon-button compact danger"
+                  disabled={!canConfigure || inUse || busyKey !== ""}
+                  onClick={() => void onRemove(item)}
+                  title={
+                    inUse
+                      ? `Reassign ${item.deviceCount} ${
+                          item.deviceCount === 1 ? "device" : "devices"
+                        } before removing this ${singular}`
+                      : `Remove ${singular}`
+                  }
+                  type="button"
+                >
+                  {deleting ? (
+                    <RefreshCw className="spin-icon" size={13} />
+                  ) : (
+                    <Trash2 size={13} />
+                  )}
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SystemAdministration({
+  appVersion,
+  canConfigure,
+  connected,
+  onFactoryReset,
+  onToast,
+  token,
+}: {
+  appVersion: string;
+  canConfigure: boolean;
+  connected: boolean;
+  onFactoryReset: () => void;
+  onToast: (text: string) => void;
+  token?: string;
+}) {
+  const [system, setSystem] = useState<ApiSystemSettings | null>(null);
+  const [loading, setLoading] = useState(canConfigure && connected);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreConfirmation, setRestoreConfirmation] = useState("");
+  const [updateFile, setUpdateFile] = useState<File | null>(null);
+  const [updateVersion, setUpdateVersion] = useState("");
+  const [vpnFile, setVpnFile] = useState<File | null>(null);
+  const [factoryPassword, setFactoryPassword] = useState("");
+  const [factoryConfirmation, setFactoryConfirmation] = useState("");
+
+  useEffect(() => {
+    if (!canConfigure || !connected) return;
+    let active = true;
+    fetchSystemSettings(token)
+      .then((response) => {
+        if (!active) return;
+        setSystem(response);
+        setError("");
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setError(
+          requestError instanceof ApiError
+            ? requestError.message
+            : "System administration status could not be loaded.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canConfigure, connected, token]);
+
+  async function refreshSystem() {
+    setSystem(await fetchSystemSettings(token));
+  }
+
+  function showActionError(requestError: unknown, fallback: string) {
+    setError(
+      requestError instanceof ApiError ? requestError.message : fallback,
+    );
+  }
+
+  async function downloadBackup() {
+    if (!canConfigure || !connected) return;
+    setBusy("backup");
+    setError("");
+    try {
+      await downloadConfigurationBackup(token);
+      onToast("Configuration backup downloaded");
+    } catch (requestError) {
+      showActionError(requestError, "Configuration backup failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function restoreBackup() {
+    if (
+      !canConfigure ||
+      !restoreFile ||
+      restoreConfirmation !== "RESTORE CONFIGURATION"
+    ) {
+      return;
+    }
+    let backup: string;
+    try {
+      backup = await restoreFile.text();
+      if (!backup.trim()) throw new Error("empty backup");
+    } catch {
+      setError("The selected encrypted backup file is empty or unreadable.");
+      return;
+    }
+    if (
+      !window.confirm(
+        "Restore this configuration backup? Current devices, tags, classifications, alarms, and settings will be replaced. Local readings, alarm events, and queued PostgreSQL samples will be cleared. User accounts and passwords remain unchanged.",
+      )
+    ) {
+      return;
+    }
+    setBusy("restore");
+    setError("");
+    try {
+      const result = await restoreConfiguration(backup, token);
+      setRestoreFile(null);
+      setRestoreConfirmation("");
+      await refreshSystem();
+      onToast(result.message || "Configuration restored");
+      window.setTimeout(() => window.location.reload(), 800);
+    } catch (requestError) {
+      showActionError(requestError, "Configuration restore failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function stageUpdate() {
+    if (
+      !canConfigure ||
+      !system?.update.helperConfigured ||
+      !updateFile ||
+      !updateVersion.trim()
+    ) {
+      return;
+    }
+    setBusy("update-stage");
+    setError("");
+    try {
+      const result = await stageSystemUpdate(
+        await updateFile.arrayBuffer(),
+        updateVersion,
+        updateFile.name,
+        token,
+      );
+      setUpdateFile(null);
+      await refreshSystem();
+      onToast(result.message || "Update package staged");
+    } catch (requestError) {
+      showActionError(requestError, "The update package could not be staged.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function applyUpdatePackage() {
+    if (!canConfigure || !system?.update.stagedVersion) return;
+    if (
+      !window.confirm(
+        `Apply version ${system.update.stagedVersion}? The logger service may restart and briefly disconnect.`,
+      )
+    ) {
+      return;
+    }
+    setBusy("update-apply");
+    setError("");
+    try {
+      const result = await applySystemUpdate(token);
+      onToast(
+        `Update helper launched for ${result.stagedVersion}; completion is pending.`,
+      );
+    } catch (requestError) {
+      showActionError(requestError, "The staged update could not be applied.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function uploadVpnProfile() {
+    if (!canConfigure || !system?.openVpn.helperConfigured || !vpnFile) {
+      return;
+    }
+    if (!vpnFile.name.toLocaleLowerCase().endsWith(".ovpn")) {
+      setError("Select an OpenVPN .ovpn profile.");
+      return;
+    }
+    setBusy("vpn-profile");
+    setError("");
+    try {
+      const result = await uploadOpenVpnProfile(
+        await vpnFile.arrayBuffer(),
+        vpnFile.name,
+        token,
+      );
+      setVpnFile(null);
+      await refreshSystem();
+      onToast(result.message || "OpenVPN profile installed");
+    } catch (requestError) {
+      showActionError(
+        requestError,
+        "The OpenVPN profile could not be installed.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function toggleVpn() {
+    if (!canConfigure || !system?.openVpn.helperConfigured) return;
+    const enabled = !system.openVpn.enabled;
+    setBusy("vpn-toggle");
+    setError("");
+    try {
+      const result = await setOpenVpnEnabled(enabled, token);
+      await refreshSystem();
+      onToast(result.message || `OpenVPN ${enabled ? "enabled" : "disabled"}`);
+    } catch (requestError) {
+      showActionError(requestError, "OpenVPN state could not be changed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function resetFactoryConfiguration() {
+    if (
+      !canConfigure ||
+      !factoryPassword ||
+      factoryConfirmation !== "FACTORY RESET"
+    ) {
+      return;
+    }
+    if (
+      !window.confirm(
+        "Factory reset this logger? Local SQLite process data and configuration, the offline PostgreSQL queue, and managed VPN/update files will be removed. Remote PostgreSQL tables and history are not deleted. All application user accounts and passwords remain unchanged. You will be signed out. This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    setBusy("factory-reset");
+    setError("");
+    try {
+      await factoryReset(factoryPassword, token);
+      onFactoryReset();
+    } catch (requestError) {
+      showActionError(requestError, "Factory reset failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  if (!canConfigure) {
+    return (
+      <section className="panel system-admin-panel">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>System administration</h3>
+            <p>Backup, restore, software update, VPN, and factory reset</p>
+          </div>
+          <ShieldCheck size={17} color="#086c58" />
+        </div>
+        <p className="system-admin-permission">
+          Administrator access is required to view and use these controls.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="system-admin-section">
+      <div className="system-admin-heading">
+        <div>
+          <p className="eyebrow">Administrator tools</p>
+          <h3>Backup, recovery, update & remote access</h3>
+          <p>
+            High-impact operations use explicit confirmation and collector-side
+            helpers.
+          </p>
+        </div>
+        <span className="version-chip">
+          {appVersion ? `Version ${appVersion}` : "Version checking…"}
+        </span>
+      </div>
+
+      {error ? (
+        <p className="login-error system-admin-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {loading ? (
+        <p className="system-admin-loading">Loading administrator status…</p>
+      ) : null}
+
+      <div className="system-admin-grid">
+        <section className="panel system-admin-card">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Configuration backup & restore</h3>
+              <p>
+                Move or recover logger configuration with an encrypted,
+                configuration-only backup.
+              </p>
+            </div>
+            <Download size={17} color="#086c58" />
+          </div>
+          <div className="system-admin-card-body">
+            <p className="factory-warning">
+              Process history is not included. Restoring clears local readings,
+              alarm events, and queued PostgreSQL samples before replacing
+              devices, tags, classifications, alarms, and settings. Destination
+              user accounts and passwords, installation ID remain unchanged.
+            </p>
+            <button
+              className="button secondary"
+              disabled={!connected || busy !== ""}
+              onClick={() => void downloadBackup()}
+              type="button"
+            >
+              <Download size={13} />
+              {busy === "backup" ? "Preparing…" : "Download backup"}
+            </button>
+            <div className="form-group">
+              <label htmlFor="restore-configuration-file">
+                Configuration backup file
+              </label>
+              <input
+                accept=".backup,text/plain"
+                className="form-control file-control"
+                id="restore-configuration-file"
+                onChange={(event) =>
+                  setRestoreFile(event.target.files?.[0] ?? null)
+                }
+                type="file"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="restore-confirmation">
+                Type RESTORE CONFIGURATION
+              </label>
+              <input
+                autoComplete="off"
+                className="form-control mono"
+                id="restore-confirmation"
+                onChange={(event) => setRestoreConfirmation(event.target.value)}
+                value={restoreConfirmation}
+              />
+            </div>
+            <button
+              className="button secondary"
+              disabled={
+                !connected ||
+                busy !== "" ||
+                !restoreFile ||
+                restoreConfirmation !== "RESTORE CONFIGURATION"
+              }
+              onClick={() => void restoreBackup()}
+              type="button"
+            >
+              <RefreshCw size={13} />
+              {busy === "restore" ? "Restoring…" : "Restore configuration"}
+            </button>
+          </div>
+        </section>
+
+        <section className="panel system-admin-card">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Software update</h3>
+              <p>
+                Stage an integrity-checked update package before applying it.
+              </p>
+            </div>
+            <Upload size={17} color="#086c58" />
+          </div>
+          <div className="system-admin-card-body">
+            {system && !system.update.helperConfigured ? (
+              <p className="helper-guidance">
+                The collector&apos;s allow-listed update helper is not
+                configured. Configure it on the logger host before staging or
+                applying packages; the dashboard cannot grant host privileges.
+              </p>
+            ) : null}
+            <p className="vpn-boundary-note">
+              The dashboard checks archive type, version, and SHA-256 integrity.
+              The external update helper must verify publisher authenticity
+              before installation.
+            </p>
+            <div className="form-grid">
+              <div className="form-group">
+                <label htmlFor="update-version">Package version</label>
+                <input
+                  className="form-control mono"
+                  id="update-version"
+                  onChange={(event) => setUpdateVersion(event.target.value)}
+                  placeholder="1.4.0"
+                  value={updateVersion}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="update-package">Update package</label>
+                <input
+                  accept=".zip,.tar.gz,application/zip,application/gzip"
+                  className="form-control file-control"
+                  id="update-package"
+                  onChange={(event) =>
+                    setUpdateFile(event.target.files?.[0] ?? null)
+                  }
+                  type="file"
+                />
+              </div>
+            </div>
+            <div className="button-row">
+              <button
+                className="button secondary"
+                disabled={
+                  busy !== "" ||
+                  !connected ||
+                  !system?.update.helperConfigured ||
+                  !updateFile ||
+                  !updateVersion.trim()
+                }
+                onClick={() => void stageUpdate()}
+                type="button"
+              >
+                <Upload size={13} />
+                {busy === "update-stage" ? "Staging…" : "Stage package"}
+              </button>
+              <button
+                className="button primary"
+                disabled={
+                  busy !== "" ||
+                  !connected ||
+                  !system?.update.helperConfigured ||
+                  !system.update.stagedVersion
+                }
+                onClick={() => void applyUpdatePackage()}
+                type="button"
+              >
+                <Play size={13} />
+                {busy === "update-apply" ? "Applying…" : "Apply staged update"}
+              </button>
+            </div>
+            <dl className="system-status-list">
+              <div>
+                <dt>Staged version</dt>
+                <dd>{system?.update.stagedVersion ?? "None"}</dd>
+              </div>
+              <div>
+                <dt>Package</dt>
+                <dd>{system?.update.stagedFilename ?? "None"}</dd>
+              </div>
+              <div>
+                <dt>SHA-256</dt>
+                <dd className="mono system-hash">
+                  {system?.update.stagedSha256 ?? "Not available"}
+                </dd>
+              </div>
+              <div>
+                <dt>Staged at</dt>
+                <dd>{formatDateTime(system?.update.stagedAt ?? null)}</dd>
+              </div>
+            </dl>
+            {system?.update.lastError ? (
+              <p className="helper-error">{system.update.lastError}</p>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="panel system-admin-card">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>OpenVPN private access</h3>
+              <p>Install a client profile and control its connection.</p>
+            </div>
+            <Network size={17} color="#086c58" />
+          </div>
+          <div className="system-admin-card-body">
+            <p className="vpn-boundary-note">
+              OpenVPN creates a private network path to this logger. It does not
+              enable SSH; host SSH access remains separately controlled by
+              operating-system policy.
+            </p>
+            {system && !system.openVpn.helperConfigured ? (
+              <p className="helper-guidance">
+                The collector&apos;s allow-listed OpenVPN helper is not
+                configured. Install and configure it on the logger host before
+                uploading or enabling a profile.
+              </p>
+            ) : null}
+            <div className="form-group">
+              <label htmlFor="openvpn-profile">OpenVPN profile</label>
+              <input
+                accept=".ovpn"
+                className="form-control file-control"
+                id="openvpn-profile"
+                onChange={(event) =>
+                  setVpnFile(event.target.files?.[0] ?? null)
+                }
+                type="file"
+              />
+            </div>
+            <div className="button-row">
+              <button
+                className="button secondary"
+                disabled={
+                  busy !== "" ||
+                  !connected ||
+                  !system?.openVpn.helperConfigured ||
+                  !vpnFile
+                }
+                onClick={() => void uploadVpnProfile()}
+                type="button"
+              >
+                <Upload size={13} />
+                {busy === "vpn-profile" ? "Installing…" : "Install profile"}
+              </button>
+              <button
+                className={
+                  system?.openVpn.enabled
+                    ? "button secondary"
+                    : "button primary"
+                }
+                disabled={
+                  busy !== "" ||
+                  !connected ||
+                  !system?.openVpn.helperConfigured ||
+                  (!system.openVpn.configured && !system.openVpn.enabled)
+                }
+                onClick={() => void toggleVpn()}
+                type="button"
+              >
+                <Network size={13} />
+                {busy === "vpn-toggle"
+                  ? "Changing…"
+                  : system?.openVpn.enabled
+                    ? "Disable VPN"
+                    : "Enable VPN"}
+              </button>
+            </div>
+            <dl className="system-status-list">
+              <div>
+                <dt>Status</dt>
+                <dd>{system?.openVpn.enabled ? "Enabled" : "Disabled"}</dd>
+              </div>
+              <div>
+                <dt>Profile</dt>
+                <dd>{system?.openVpn.profileName ?? "Not installed"}</dd>
+              </div>
+              <div>
+                <dt>Last changed</dt>
+                <dd>{formatDateTime(system?.openVpn.lastChangedAt ?? null)}</dd>
+              </div>
+            </dl>
+            {system?.openVpn.lastError ? (
+              <p className="helper-error">{system.openVpn.lastError}</p>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="panel system-admin-card factory-reset-card">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Factory reset</h3>
+              <p>Permanently return this logger to its initial state.</p>
+            </div>
+            <Trash2 size={17} color="#aa372f" />
+          </div>
+          <div className="system-admin-card-body">
+            <p className="factory-warning">
+              Download a configuration backup first. Factory reset clears local
+              SQLite data and configuration, the offline PostgreSQL queue, and
+              managed VPN/update files. It does not drop remote PostgreSQL
+              tables or history; manage those separately. All application user
+              accounts and passwords remain. After reset, this browser
+              signs out and an existing user can sign in again.
+            </p>
+            <div className="form-group">
+              <label htmlFor="factory-current-password">
+                Current administrator password
+              </label>
+              <input
+                autoComplete="current-password"
+                className="form-control"
+                id="factory-current-password"
+                onChange={(event) => setFactoryPassword(event.target.value)}
+                type="password"
+                value={factoryPassword}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="factory-confirmation">Type FACTORY RESET</label>
+              <input
+                autoComplete="off"
+                className="form-control mono"
+                id="factory-confirmation"
+                onChange={(event) => setFactoryConfirmation(event.target.value)}
+                value={factoryConfirmation}
+              />
+            </div>
+            <button
+              className="button danger-button"
+              disabled={
+                busy !== "" ||
+                !connected ||
+                !factoryPassword ||
+                factoryConfirmation !== "FACTORY RESET"
+              }
+              onClick={() => void resetFactoryConfiguration()}
+              type="button"
+            >
+              <Trash2 size={13} />
+              {busy === "factory-reset" ? "Resetting…" : "Factory reset logger"}
+            </button>
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function SettingsView({
+  appVersion,
+  canConfigure,
+  connected,
+  onFactoryReset,
+  onToast,
+  token,
+}: {
+  appVersion: string;
+  canConfigure: boolean;
+  connected: boolean;
+  onFactoryReset: () => void;
+  onToast: (text: string) => void;
+  token?: string;
+}) {
+  const [classifications, setClassifications] =
+    useState<ApiDeviceClassifications>(emptyDeviceClassifications);
+  const [categoryDraft, setCategoryDraft] = useState("");
+  const [groupDraft, setGroupDraft] = useState("");
+  const [classificationBusy, setClassificationBusy] = useState("");
+  const [classificationError, setClassificationError] = useState("");
+  const [classificationsLoading, setClassificationsLoading] =
+    useState(connected);
+
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    fetchDeviceClassifications(token)
+      .then((response) => {
+        if (!active) return;
+        setClassifications(response);
+        setClassificationError("");
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setClassificationError(
+          requestError instanceof ApiError
+            ? requestError.message
+            : "Categories and groups could not be loaded.",
+        );
+      })
+      .finally(() => {
+        if (active) setClassificationsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [connected, token]);
+
+  async function refreshClassifications() {
+    const response = await fetchDeviceClassifications(token);
+    setClassifications(response);
+  }
+
+  async function addClassification(kind: DeviceClassificationKind) {
+    const draft = kind === "categories" ? categoryDraft : groupDraft;
+    const name = draft.trim();
+    if (!name || !canConfigure) return;
+    setClassificationBusy(`${kind}:create`);
+    setClassificationError("");
+    try {
+      await createDeviceClassification(kind, name, token);
+      await refreshClassifications();
+      if (kind === "categories") {
+        setCategoryDraft("");
+      } else {
+        setGroupDraft("");
+      }
+      onToast(`${kind === "categories" ? "Category" : "Group"} ${name} added`);
+    } catch (requestError) {
+      setClassificationError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : `The ${kind === "categories" ? "category" : "group"} could not be added.`,
+      );
+    } finally {
+      setClassificationBusy("");
+    }
+  }
+
+  async function removeClassification(
+    kind: DeviceClassificationKind,
+    item: ApiDeviceClassification,
+  ) {
+    const singular = kind === "categories" ? "category" : "group";
+    if (!canConfigure) return;
+    if (item.deviceCount > 0) {
+      setClassificationError(
+        `Reassign the ${item.deviceCount} ${
+          item.deviceCount === 1 ? "device" : "devices"
+        } using ${item.name} before removing this ${singular}.`,
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `Remove ${singular} ${item.name}? It will no longer be available on device forms.`,
+      )
+    ) {
+      return;
+    }
+    setClassificationBusy(`${kind}:${item.id}`);
+    setClassificationError("");
+    try {
+      await deleteDeviceClassification(kind, item.id, token);
+      await refreshClassifications();
+      onToast(
+        `${kind === "categories" ? "Category" : "Group"} ${item.name} removed`,
+      );
+    } catch (requestError) {
+      setClassificationError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : `The ${singular} could not be removed.`,
+      );
+    } finally {
+      setClassificationBusy("");
+    }
+  }
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Administration"
+        title="System tools"
+        copy="Manage device classifications, configuration recovery, software updates, VPN access, and host protection guidance."
+      />
+      <div className="settings-layout">
+        <section className="panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Collection service</h3>
+              <p>Runtime and storage defaults</p>
+            </div>
+            <ServerCog size={17} color="#086c58" />
+          </div>
+          <div className="form-grid">
+            <div className="form-group settings-information">
+              <Clock3 size={16} />
+              <div>
+                <strong>Polling and database save intervals</strong>
+                <p>
+                  These schedules are configured on each device. Open Devices,
+                  then add or edit a device to change them.
+                </p>
+              </div>
+            </div>
+            <div className="form-group full settings-information">
+              <Database size={16} />
+              <div>
+                <strong>Local database path</strong>
+                <p>
+                  The SQLite database location is managed by the collector
+                  host&apos;s environment and cannot be changed from this
+                  dashboard.
+                </p>
+              </div>
+            </div>
+            <div className="form-group full settings-information">
+              <Database size={16} />
+              <div>
+                <strong>Remote historian controls</strong>
+                <p>
+                  Connection, timezone, retention, downsampling, and offline
+                  cache settings are kept together under Data connections →
+                  Historian.
+                </p>
+              </div>
+            </div>
+            <div className="form-group full settings-information">
+              <ServerCog size={16} />
+              <div>
+                <strong>Per-device historian policies</strong>
+                <p>
+                  Automatic downsampling, raw retention, summary retention, and
+                  cleanup frequency are configured separately when adding or
+                  editing each device.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Runtime protection status</h3>
+              <p>Enforced or scheduled on the collector host</p>
+            </div>
+            <ShieldCheck size={17} color="#086c58" />
+          </div>
+          <div className="settings-status-list">
+            <div className="settings-status-row">
+              <KeyRound size={15} />
+              <div>
+                <strong>Authentication is runtime-enforced</strong>
+                <p>
+                  The collector host controls authentication policy. It is not a
+                  dashboard toggle.
+                </p>
+              </div>
+            </div>
+            <div className="settings-status-row">
+              <ShieldCheck size={15} />
+              <div>
+                <strong>Audit logging is collector-enforced</strong>
+                <p>
+                  Security and configuration actions are recorded by the
+                  collector runtime.
+                </p>
+              </div>
+            </div>
+            <div className="settings-status-row backup-status-warning">
+              <Download size={15} />
+              <div>
+                <strong>Scheduled SQLite backup requires host setup</strong>
+                <p>
+                  Automatic daily process-data backup is not configured here.
+                  Schedule verified SQLite backups on the host. A manual
+                  encrypted configuration-only backup is available below.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <section className="panel classification-panel">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>Device report classifications</h3>
+            <p>
+              Maintain reusable choices for device forms and report filters.
+            </p>
+          </div>
+          <FileChartColumn size={17} color="#086c58" />
+        </div>
+        {classificationError ? (
+          <p className="login-error classification-error" role="alert">
+            {classificationError}
+          </p>
+        ) : null}
+        <div className="classification-grid">
+          <DeviceClassificationEditor
+            busyKey={classificationBusy}
+            canConfigure={canConfigure}
+            draft={categoryDraft}
+            items={classifications.categories}
+            kind="categories"
+            loading={classificationsLoading}
+            onCreate={() => addClassification("categories")}
+            onDraftChange={setCategoryDraft}
+            onRemove={(item) => removeClassification("categories", item)}
+          />
+          <DeviceClassificationEditor
+            busyKey={classificationBusy}
+            canConfigure={canConfigure}
+            draft={groupDraft}
+            items={classifications.groups}
+            kind="groups"
+            loading={classificationsLoading}
+            onCreate={() => addClassification("groups")}
+            onDraftChange={setGroupDraft}
+            onRemove={(item) => removeClassification("groups", item)}
+          />
+        </div>
+        <p className="classification-footer-note">
+          A classification cannot be removed while devices use it. Reassign
+          those devices first so saved report definitions stay understandable.
+        </p>
+      </section>
+      <SystemAdministration
+        appVersion={appVersion}
+        canConfigure={canConfigure}
+        connected={connected}
+        onFactoryReset={onFactoryReset}
+        onToast={onToast}
+        token={token}
+      />
+    </>
+  );
+}
+
+function UserManagementView({
+  currentUser,
+  connected,
+  token,
+  onToast,
+}: {
+  currentUser: ApiUser | null;
+  connected: boolean;
+  token?: string;
+  onToast: (text: string) => void;
+}) {
+  const [users, setUsers] = useState<ApiManagedUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<ApiRole>("viewer");
+  const [resetTarget, setResetTarget] = useState<ApiManagedUser | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+
+  const loadUsers = useCallback(async () => {
+    if (!connected) return;
+    const response = await fetchUsers(token);
+    setUsers(response);
+    setError("");
+  }, [connected, token]);
+
+  useEffect(() => {
+    let active = true;
+    if (!connected) return;
+    fetchUsers(token)
+      .then((response) => {
+        if (active) {
+          setUsers(response);
+          setError("");
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setError(
+            requestError instanceof ApiError
+              ? requestError.message
+              : "Users could not be loaded.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [connected, token]);
+
+  function showError(requestError: unknown, fallback: string) {
+    setError(
+      requestError instanceof ApiError ? requestError.message : fallback,
+    );
+  }
+
+  async function addUser(event: React.FormEvent) {
+    event.preventDefault();
+    if (!username.trim() || !password) return;
+    setBusy("create");
+    setError("");
+    try {
+      await createUser(
+        { username: username.trim(), password, role, enabled: true },
+        token,
+      );
+      setUsername("");
+      setPassword("");
+      setRole("viewer");
+      await loadUsers();
+      onToast("User created");
+    } catch (requestError) {
+      showError(requestError, "The user could not be created.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function changeUser(
+    user: ApiManagedUser,
+    update: { role?: ApiRole; enabled?: boolean },
+  ) {
+    setBusy(user.id);
+    setError("");
+    try {
+      const updated = await updateUser(user.id, update, token);
+      setUsers((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      onToast(
+        update.role
+          ? `${updated.username}'s role changed`
+          : `${updated.username} ${updated.enabled ? "enabled" : "disabled"}`,
+      );
+    } catch (requestError) {
+      showError(requestError, "The user could not be updated.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function submitPasswordReset(event: React.FormEvent) {
+    event.preventDefault();
+    if (!resetTarget || !resetPassword) return;
+    setBusy(`password-${resetTarget.id}`);
+    setError("");
+    try {
+      await resetUserPassword(resetTarget.id, resetPassword, token);
+      onToast(`${resetTarget.username}'s password was reset`);
+      setResetTarget(null);
+      setResetPassword("");
+    } catch (requestError) {
+      showError(requestError, "The password could not be reset.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function removeUser(user: ApiManagedUser) {
+    if (
+      !window.confirm(
+        `Delete user "${user.username}"? They will no longer be able to sign in.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`delete-${user.id}`);
+    setError("");
+    try {
+      await deleteUser(user.id, token);
+      setUsers((current) => current.filter((item) => item.id !== user.id));
+      onToast("User deleted");
+    } catch (requestError) {
+      showError(requestError, "The user could not be deleted.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Access control"
+        title="Users"
+        copy="Create separate accounts and give each person only the access required for their work."
+      />
+      {error ? (
+        <p className="login-error management-page-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="management-layout">
+        <section className="panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <h3>Add user</h3>
+              <p>Simple non-empty passwords are accepted.</p>
+            </div>
+            <Users size={17} color="#086c58" />
+          </div>
+          <form className="form-grid" onSubmit={(event) => void addUser(event)}>
+            <div className="form-group">
+              <label htmlFor="new-user-name">Username</label>
+              <input
+                autoComplete="off"
+                className="form-control"
+                id="new-user-name"
+                onChange={(event) => setUsername(event.target.value)}
+                required
+                value={username}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="new-user-password">Temporary password</label>
+              <input
+                autoComplete="new-password"
+                className="form-control"
+                id="new-user-password"
+                minLength={1}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="new-user-role">Role</label>
+              <select
+                className="form-control"
+                id="new-user-role"
+                onChange={(event) => setRole(event.target.value as ApiRole)}
+                value={role}
+              >
+                {userRoles.map((item) => (
+                  <option key={item} value={item}>
+                    {roleLabel(item)}
+                  </option>
+                ))}
+              </select>
+              <p className="form-help">
+                Monitoring only can view process data. Diagnostic can also
+                inspect and export activity logs.
+              </p>
+            </div>
+            <div className="form-group user-create-action">
+              <button
+                className="button primary"
+                disabled={!connected || busy !== "" || !username.trim() || !password}
+                type="submit"
+              >
+                <Plus size={14} />
+                {busy === "create" ? "Creating…" : "Create user"}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        {resetTarget ? (
+          <section className="panel reset-password-panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <h3>Reset {resetTarget.username}&apos;s password</h3>
+                <p>The new password takes effect immediately.</p>
+              </div>
+              <button
+                aria-label="Close password reset"
+                className="icon-button"
+                onClick={() => {
+                  setResetTarget(null);
+                  setResetPassword("");
+                }}
+                type="button"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <form
+              className="password-reset-form"
+              onSubmit={(event) => void submitPasswordReset(event)}
+            >
+              <div className="form-group">
+                <label htmlFor="managed-user-password">New password</label>
+                <input
+                  autoComplete="new-password"
+                  className="form-control"
+                  id="managed-user-password"
+                  minLength={1}
+                  onChange={(event) => setResetPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={resetPassword}
+                />
+              </div>
+              <button
+                className="button primary"
+                disabled={!resetPassword || busy !== ""}
+                type="submit"
+              >
+                <KeyRound size={14} />
+                {busy === `password-${resetTarget.id}`
+                  ? "Resetting…"
+                  : "Reset password"}
+              </button>
+            </form>
+          </section>
+        ) : null}
+      </div>
+
+      <section className="panel table-panel user-table-panel">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>System users</h3>
+            <p>{users.length} configured accounts</p>
+          </div>
+          <button
+            aria-label="Refresh users"
+            className="icon-button"
+            disabled={!connected || loading}
+            onClick={() => void loadUsers()}
+            type="button"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
+        {loading && connected ? (
+          <div className="empty-state">
+            <p>Loading users…</p>
+          </div>
+        ) : users.length === 0 ? (
+          <div className="empty-state">
+            <div>
+              <span className="empty-state-icon">
+                <Users size={20} />
+              </span>
+              <h3>No users returned</h3>
+              <p>Check that the collector is online and try again.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th className="actions-heading">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => {
+                  const isCurrent = user.id === currentUser?.id;
+                  return (
+                    <tr key={user.id}>
+                      <td>
+                        <span className="table-primary">{user.username}</span>
+                        {isCurrent ? (
+                          <span className="current-user-marker">You</span>
+                        ) : null}
+                      </td>
+                      <td>
+                        <select
+                          aria-label={`Role for ${user.username}`}
+                          className="form-control compact-control"
+                          disabled={busy !== "" || isCurrent}
+                          title={
+                            isCurrent
+                              ? "Use another administrator account to change your role"
+                              : "Change user role"
+                          }
+                          onChange={(event) =>
+                            void changeUser(user, {
+                              role: event.target.value as ApiRole,
+                            })
+                          }
+                          value={user.role}
+                        >
+                          {userRoles.map((item) => (
+                            <option key={item} value={item}>
+                              {roleLabel(item)}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <StatusPill status={user.enabled ? "online" : "offline"}>
+                          {user.enabled ? "enabled" : "disabled"}
+                        </StatusPill>
+                      </td>
+                      <td>{formatDateTime(user.createdAt)}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            aria-label={`Reset password for ${user.username}`}
+                            className="icon-button"
+                            disabled={busy !== "" || isCurrent}
+                            onClick={() => {
+                              setResetTarget(user);
+                              setResetPassword("");
+                            }}
+                            title={
+                              isCurrent
+                                ? "Use the account menu to change your own password"
+                                : "Reset password"
+                            }
+                            type="button"
+                          >
+                            <KeyRound size={14} />
+                          </button>
+                          <button
+                            aria-label={`${user.enabled ? "Disable" : "Enable"} ${user.username}`}
+                            className="icon-button"
+                            disabled={busy !== "" || isCurrent}
+                            onClick={() =>
+                              void changeUser(user, { enabled: !user.enabled })
+                            }
+                            title={
+                              isCurrent
+                                ? "You cannot disable your current account"
+                                : user.enabled
+                                  ? "Disable user"
+                                  : "Enable user"
+                            }
+                            type="button"
+                          >
+                            {user.enabled ? (
+                              <WifiOff size={14} />
+                            ) : (
+                              <Check size={14} />
+                            )}
+                          </button>
+                          <button
+                            aria-label={`Delete ${user.username}`}
+                            className="icon-button danger-icon-button"
+                            disabled={busy !== "" || isCurrent}
+                            onClick={() => void removeUser(user)}
+                            title={
+                              isCurrent
+                                ? "You cannot delete your current account"
+                                : "Delete user"
+                            }
+                            type="button"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function ActivityDiagnosticsView({
+  connected,
+  token,
+  onToast,
+}: {
+  connected: boolean;
+  token?: string;
+  onToast: (text: string) => void;
+}) {
+  const [items, setItems] = useState<ApiAuditEvent[]>([]);
+  const [search, setSearch] = useState("");
+  const [level, setLevel] = useState<"" | ApiAuditEvent["level"]>("");
+  const [category, setCategory] = useState<
+    "" | ApiAuditEvent["category"]
+  >("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState("");
+  const [showKwhReport, setShowKwhReport] = useState(false);
+
+  const filters = useMemo(
+    () => ({
+      search,
+      level,
+      category,
+      from: localDateTimeToIso(from),
+      to: localDateTimeToIso(to),
+      page,
+      pageSize: 50,
+    }),
+    [category, from, level, page, search, to],
+  );
+
+  useEffect(() => {
+    if (!connected) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      fetchActivity(filters, token, controller.signal)
+        .then((response) => {
+          setItems(response.items);
+          setTotal(response.total);
+          setTotalPages(Math.max(1, response.totalPages));
+          setError("");
+        })
+        .catch((requestError: unknown) => {
+          if (
+            !(requestError instanceof DOMException) ||
+            requestError.name !== "AbortError"
+          ) {
+            setError(
+              requestError instanceof ApiError
+                ? requestError.message
+                : "Activity could not be loaded.",
+            );
+          }
+        })
+        .finally(() => setLoading(false));
+    }, 250);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [connected, filters, token]);
+
+  useEffect(() => {
+    if (!connected || !autoRefresh) return;
+    const interval = window.setInterval(() => {
+      fetchActivity(filters, token)
+        .then((response) => {
+          setItems(response.items);
+          setTotal(response.total);
+          setTotalPages(Math.max(1, response.totalPages));
+          setError("");
+        })
+        .catch(() => undefined);
+    }, 10_000);
+    return () => window.clearInterval(interval);
+  }, [autoRefresh, connected, filters, token]);
+
+  async function exportCsv() {
+    setExporting(true);
+    setError("");
+    try {
+      const result = await downloadActivityCsv(filters, token);
+      onToast(
+        result.truncated
+          ? `Activity CSV downloaded (newest ${result.rowLimit ?? 1_000} matching rows)`
+          : "Activity CSV downloaded",
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Activity CSV could not be downloaded.",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Audit & troubleshooting"
+        title="Diagnostics & logs"
+        copy="Review sign-ins, configuration changes, device transitions, and collector events in one searchable timeline."
+      >
+        <label className="setting-toggle-card compact-toggle">
+          <input
+            checked={autoRefresh}
+            onChange={(event) => setAutoRefresh(event.target.checked)}
+            type="checkbox"
+          />
+          <span>
+            <strong>Auto refresh</strong>
+            <small>Every 10 seconds</small>
+          </span>
+        </label>
+        <button
+          className="button secondary"
+          disabled={!connected || exporting}
+          onClick={() => void exportCsv()}
+          type="button"
+        >
+          <Download size={14} />
+          {exporting ? "Exporting…" : "Download CSV"}
+        </button>
+      </SectionIntro>
+
+      <section className="panel activity-filter-panel">
+        <div className="activity-filter-grid">
+          <div className="form-group activity-search-group">
+            <label htmlFor="activity-search">Search activity</label>
+            <div className="search-field">
+              <Search size={14} />
+              <input
+                id="activity-search"
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Event, message, user, entity or IP"
+                value={search}
+              />
+            </div>
+          </div>
+          <div className="form-group">
+            <label htmlFor="activity-level">Level</label>
+            <select
+              className="form-control"
+              id="activity-level"
+              onChange={(event) => {
+                setLevel(event.target.value as typeof level);
+                setPage(1);
+              }}
+              value={level}
+            >
+              <option value="">All levels</option>
+              <option value="info">Information</option>
+              <option value="warning">Warning</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="activity-category">Category</label>
+            <select
+              className="form-control"
+              id="activity-category"
+              onChange={(event) => {
+                setCategory(event.target.value as typeof category);
+                setPage(1);
+              }}
+              value={category}
+            >
+              <option value="">All categories</option>
+              <option value="audit">Audit</option>
+              <option value="device">Device</option>
+              <option value="system">System</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="activity-from">From</label>
+            <input
+              className="form-control"
+              id="activity-from"
+              onChange={(event) => {
+                setFrom(event.target.value);
+                setPage(1);
+              }}
+              type="datetime-local"
+              value={from}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="activity-to">To</label>
+            <input
+              className="form-control"
+              id="activity-to"
+              onChange={(event) => {
+                setTo(event.target.value);
+                setPage(1);
+              }}
+              type="datetime-local"
+              value={to}
+            />
+          </div>
+        </div>
+      </section>
+
+      {error ? (
+        <p className="login-error management-page-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <section className="panel table-panel">
+        <div className="panel-header">
+          <div className="panel-title">
+            <h3>Activity timeline</h3>
+            <p>{formatInteger(total)} matching events</p>
+          </div>
+          <span className="connection-pill">
+            <span className="pulse-dot" />
+            {loading ? "Refreshing" : "Current"}
+          </span>
+        </div>
+        {loading && connected && items.length === 0 ? (
+          <div className="empty-state">
+            <p>Loading activity…</p>
+          </div>
+        ) : items.length === 0 ? (
+          <div className="empty-state">
+            <div>
+              <span className="empty-state-icon">
+                <ScrollText size={20} />
+              </span>
+              <h3>
+                {connected ? "No matching activity" : "Collector unavailable"}
+              </h3>
+              <p>
+                {connected
+                  ? "Change the filters or wait for new collector activity."
+                  : "Start the collector to load the activity timeline."}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="data-table-wrap">
+            <table className="data-table activity-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Level</th>
+                  <th>Category</th>
+                  <th>Event</th>
+                  <th>Message</th>
+                  <th>User / source</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.id}>
+                    <td>{formatDateTime(item.timestamp)}</td>
+                    <td>
+                      <span className={`activity-level ${item.level}`}>
+                        {item.level}
+                      </span>
+                    </td>
+                    <td>{item.category}</td>
+                    <td>
+                      <span className="table-primary mono">{item.event}</span>
+                    </td>
+                    <td className="activity-message">{item.message}</td>
+                    <td>
+                      <span>{item.actorUsername ?? "System"}</span>
+                      <small className="table-secondary">
+                        {item.sourceIp ?? "Local"}
+                      </small>
+                    </td>
+                    <td>
+                      <details className="activity-details">
+                        <summary>View</summary>
+                        <pre>{JSON.stringify(item.details, null, 2)}</pre>
+                      </details>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="table-pagination">
+          <p>
+            Page {Math.min(page, totalPages)} of {totalPages}
+          </p>
+          <div className="button-row">
+            <button
+              className="button secondary"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+              type="button"
+            >
+              Previous
+            </button>
+            <button
+              className="button secondary"
+              disabled={page >= totalPages}
+              onClick={() =>
+                setPage((value) => Math.min(totalPages, value + 1))
+              }
+              type="button"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function runtimeStatus(
+  state: ApiDataServerSettings["modbus"]["runtime"]["state"],
+) {
+  if (state === "running") return "online" as const;
+  if (state === "starting" || state === "stopping") return "warning" as const;
+  return "offline" as const;
+}
+
+function DataServersView({
+  canConfigure,
+  connected,
+  token,
+  onToast,
+}: {
+  canConfigure: boolean;
+  connected: boolean;
+  token?: string;
+  onToast: (text: string) => void;
+}) {
+  const [settings, setSettings] = useState<ApiDataServerSettings | null>(null);
+  const [deviceItems, setDeviceItems] = useState<ApiDevice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadSettings = useCallback(async () => {
+    if (!connected) return;
+    const [configuration, configuredDevices] = await Promise.all([
+      fetchDataServerSettings(token),
+      fetchDevices(token),
+    ]);
+    setSettings(configuration);
+    setDeviceItems(configuredDevices);
+    setError("");
+  }, [connected, token]);
+
+  useEffect(() => {
+    let active = true;
+    if (!connected) return;
+    Promise.all([fetchDataServerSettings(token), fetchDevices(token)])
+      .then(([configuration, configuredDevices]) => {
+        if (!active) return;
+        setSettings(configuration);
+        setDeviceItems(configuredDevices);
+        setError("");
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setError(
+            requestError instanceof ApiError
+              ? requestError.message
+              : "Data server settings could not be loaded.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [connected, token]);
+
+  function patchModbus(
+    update: Partial<ApiDataServerSettings["modbus"]>,
+  ) {
+    setSettings((current) =>
+      current
+        ? { ...current, modbus: { ...current.modbus, ...update } }
+        : current,
+    );
+  }
+
+  function patchOpcUa(update: Partial<ApiDataServerSettings["opcUa"]>) {
+    setSettings((current) =>
+      current ? { ...current, opcUa: { ...current.opcUa, ...update } } : current,
+    );
+  }
+
+  function changeModbusMapping(
+    device: ApiDevice,
+    update: Partial<{ enabled: boolean; unitId: number }>,
+  ) {
+    if (!settings) return;
+    const existing = settings.modbus.mappings.find(
+      (item) => item.deviceId === device.id,
+    ) ?? { deviceId: device.id, enabled: false, unitId: device.unitId };
+    patchModbus({
+      mappings: [
+        ...settings.modbus.mappings.filter(
+          (item) => item.deviceId !== device.id,
+        ),
+        { ...existing, ...update },
+      ],
+    });
+  }
+
+  function changeOpcPublication(deviceId: string, enabled: boolean) {
+    if (!settings) return;
+    patchOpcUa({
+      publications: [
+        ...settings.opcUa.publications.filter(
+          (item) => item.deviceId !== deviceId,
+        ),
+        { deviceId, enabled },
+      ],
+    });
+  }
+
+  async function saveSettings(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canConfigure || !settings) return;
+    const payload: DataServerSettingsPayload = {
+      modbus: {
+        enabled: settings.modbus.enabled,
+        bindAddress: settings.modbus.bindAddress,
+        port: settings.modbus.port,
+        refreshIntervalMs: settings.modbus.refreshIntervalMs,
+        mappings: settings.modbus.mappings,
+      },
+      opcUa: {
+        enabled: settings.opcUa.enabled,
+        bindAddress: settings.opcUa.bindAddress,
+        advertisedHost: settings.opcUa.advertisedHost,
+        port: settings.opcUa.port,
+        endpointPath: settings.opcUa.endpointPath,
+        allowAnonymous: settings.opcUa.allowAnonymous,
+        refreshIntervalMs: settings.opcUa.refreshIntervalMs,
+        publications: settings.opcUa.publications,
+      },
+    };
+    setSaving(true);
+    setError("");
+    try {
+      setSettings(await saveDataServerSettings(payload, token));
+      onToast("Data server settings saved");
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Data server settings could not be saved.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const modbusEndpoint = settings
+    ? `${settings.modbus.bindAddress === "0.0.0.0" || settings.modbus.bindAddress === "::" ? "<logger-ip>" : settings.modbus.bindAddress}:${settings.modbus.port}`
+    : "";
+
+  return (
+    <>
+      <SectionIntro
+        eyebrow="Read-only data forwarding"
+        title="Protocol servers"
+        copy="Expose the latest collected values to external Modbus TCP clients and OPC UA applications without allowing them to write into this logger."
+      >
+        <button
+          className="button secondary"
+          disabled={!connected || loading}
+          onClick={() => void loadSettings()}
+          type="button"
+        >
+          <RefreshCw size={14} />
+          Refresh status
+        </button>
+      </SectionIntro>
+      {!canConfigure ? (
+        <div className="settings-information data-server-view-note">
+          <ShieldCheck size={17} />
+          <div>
+            <strong>Diagnostic view</strong>
+            <p>
+              You can inspect configuration and runtime status. Administrator
+              access is required to make changes.
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {error ? (
+        <p className="login-error management-page-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {loading || !settings ? (
+        <section className="panel">
+          <div className="empty-state">
+            <p>
+              {connected
+                ? "Loading data server configuration…"
+                : "Start the collector to load data server configuration."}
+            </p>
+          </div>
+        </section>
+      ) : (
+        <form onSubmit={(event) => void saveSettings(event)}>
+          <div className="data-server-grid">
+            <section className="panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <h3>Modbus TCP server</h3>
+                  <p>Inbound server for external gateways and clients</p>
+                </div>
+                <div className="server-panel-statuses">
+                  <span className="read-only-badge">
+                    <ShieldCheck size={12} />
+                    Read only
+                  </span>
+                  <StatusPill
+                    status={runtimeStatus(settings.modbus.runtime.state)}
+                  >
+                    {settings.modbus.runtime.state}
+                  </StatusPill>
+                </div>
+              </div>
+              <div className="connection-direction">
+                <span>Outside gateway / client</span>
+                <span aria-hidden="true" className="connection-direction-arrow">
+                  connects to →
+                </span>
+                <strong>This logger server</strong>
+                <code>{modbusEndpoint}</code>
+              </div>
+              <div className="form-grid">
+                <label className="setting-toggle-card form-group full">
+                  <input
+                    checked={settings.modbus.enabled}
+                    disabled={!canConfigure}
+                    onChange={(event) =>
+                      patchModbus({ enabled: event.target.checked })
+                    }
+                    type="checkbox"
+                  />
+                  <span>
+                    <strong>Enable Modbus TCP server</strong>
+                    <small>
+                      Listen for inbound connections. This logger does not
+                      initiate a connection to the outside gateway.
+                    </small>
+                  </span>
+                </label>
+                <div className="form-group">
+                  <label htmlFor="modbus-server-address">Bind address</label>
+                  <input
+                    className="form-control mono"
+                    disabled={!canConfigure}
+                    id="modbus-server-address"
+                    onChange={(event) =>
+                      patchModbus({ bindAddress: event.target.value })
+                    }
+                    required
+                    value={settings.modbus.bindAddress}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="modbus-server-port">TCP port</label>
+                  <input
+                    className="form-control"
+                    disabled={!canConfigure}
+                    id="modbus-server-port"
+                    max={65535}
+                    min={1}
+                    onChange={(event) =>
+                      patchModbus({ port: Number(event.target.value) })
+                    }
+                    required
+                    type="number"
+                    value={settings.modbus.port}
+                  />
+                  <small>
+                    Docker deployments must publish the same collector port.
+                  </small>
+                </div>
+                <div className="form-group full">
+                  <label htmlFor="modbus-server-refresh">
+                    Value refresh interval (ms)
+                  </label>
+                  <input
+                    className="form-control"
+                    disabled={!canConfigure}
+                    id="modbus-server-refresh"
+                    max={60000}
+                    min={100}
+                    onChange={(event) =>
+                      patchModbus({
+                        refreshIntervalMs: Number(event.target.value),
+                      })
+                    }
+                    required
+                    type="number"
+                    value={settings.modbus.refreshIntervalMs}
+                  />
+                </div>
+              </div>
+              <div className="runtime-summary">
+                <span>
+                  <strong>{settings.modbus.runtime.connectedClients}</strong>
+                  connected clients
+                </span>
+                <span>
+                  <strong>{settings.modbus.runtime.requestCount}</strong>{" "}
+                  requests
+                </span>
+                <span>
+                  Last refresh{" "}
+                  <strong>
+                    {formatDateTime(settings.modbus.runtime.lastRefreshAt)}
+                  </strong>
+                </span>
+              </div>
+              {settings.modbus.runtime.message ? (
+                <p className="runtime-message">
+                  {settings.modbus.runtime.message}
+                </p>
+              ) : null}
+              <div className="mapping-section">
+                <h4>Virtual Unit IDs</h4>
+                <p>
+                  Map each logger device to a unique virtual Unit ID from 1 to
+                  247. The connected outside client selects that Unit ID when
+                  reading values.
+                </p>
+                <div className="mapping-list">
+                  {deviceItems.map((device) => {
+                    const mapping = settings.modbus.mappings.find(
+                      (item) => item.deviceId === device.id,
+                    ) ?? {
+                      deviceId: device.id,
+                      enabled: false,
+                      unitId: device.unitId,
+                    };
+                    return (
+                      <div className="mapping-row" key={device.id}>
+                        <label className="switch-label">
+                          <input
+                            checked={mapping.enabled}
+                            disabled={!canConfigure}
+                            onChange={(event) =>
+                              changeModbusMapping(device, {
+                                enabled: event.target.checked,
+                              })
+                            }
+                            type="checkbox"
+                          />
+                          <span>
+                            <strong>{device.name}</strong>
+                            <small>{device.tagCount} tags</small>
+                          </span>
+                        </label>
+                        <div className="mapping-unit">
+                          <label htmlFor={`modbus-unit-${device.id}`}>
+                            Unit ID
+                          </label>
+                          <input
+                            className="form-control"
+                            disabled={!canConfigure || !mapping.enabled}
+                            id={`modbus-unit-${device.id}`}
+                            max={247}
+                            min={1}
+                            onChange={(event) =>
+                              changeModbusMapping(device, {
+                                unitId: Number(event.target.value),
+                              })
+                            }
+                            type="number"
+                            value={mapping.unitId}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div className="panel-title">
+                  <h3>OPC UA server</h3>
+                  <p>Structured device and tag publication</p>
+                </div>
+                <StatusPill status={runtimeStatus(settings.opcUa.runtime.state)}>
+                  {settings.opcUa.runtime.state}
+                </StatusPill>
+              </div>
+              <div className="form-grid">
+                <label className="setting-toggle-card form-group full">
+                  <input
+                    checked={settings.opcUa.enabled}
+                    disabled={!canConfigure}
+                    onChange={(event) =>
+                      patchOpcUa({ enabled: event.target.checked })
+                    }
+                    type="checkbox"
+                  />
+                  <span>
+                    <strong>Enable OPC UA server</strong>
+                    <small>
+                      Publish current device and tag values as read-only nodes.
+                    </small>
+                  </span>
+                </label>
+                <div className="form-group">
+                  <label htmlFor="opc-server-address">Bind address</label>
+                  <input
+                    className="form-control mono"
+                    disabled={!canConfigure}
+                    id="opc-server-address"
+                    onChange={(event) =>
+                      patchOpcUa({ bindAddress: event.target.value })
+                    }
+                    required
+                    value={settings.opcUa.bindAddress}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="opc-advertised-host">
+                    Client hostname or IP
+                  </label>
+                  <input
+                    className="form-control mono"
+                    disabled={!canConfigure}
+                    id="opc-advertised-host"
+                    onChange={(event) =>
+                      patchOpcUa({ advertisedHost: event.target.value })
+                    }
+                    required
+                    value={settings.opcUa.advertisedHost}
+                  />
+                  <small>
+                    Address clients use in the OPC UA endpoint and certificate.
+                  </small>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="opc-server-port">TCP port</label>
+                  <input
+                    className="form-control"
+                    disabled={!canConfigure}
+                    id="opc-server-port"
+                    max={65535}
+                    min={1}
+                    onChange={(event) =>
+                      patchOpcUa({ port: Number(event.target.value) })
+                    }
+                    required
+                    type="number"
+                    value={settings.opcUa.port}
+                  />
+                  <small>
+                    Docker deployments must publish the same collector port.
+                  </small>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="opc-endpoint-path">Endpoint path</label>
+                  <input
+                    className="form-control mono"
+                    disabled={!canConfigure}
+                    id="opc-endpoint-path"
+                    onChange={(event) =>
+                      patchOpcUa({ endpointPath: event.target.value })
+                    }
+                    required
+                    value={settings.opcUa.endpointPath}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="opc-server-refresh">
+                    Value refresh interval (ms)
+                  </label>
+                  <input
+                    className="form-control"
+                    disabled={!canConfigure}
+                    id="opc-server-refresh"
+                    max={60000}
+                    min={100}
+                    onChange={(event) =>
+                      patchOpcUa({
+                        refreshIntervalMs: Number(event.target.value),
+                      })
+                    }
+                    required
+                    type="number"
+                    value={settings.opcUa.refreshIntervalMs}
+                  />
+                </div>
+                <label className="setting-toggle-card form-group full">
+                  <input
+                    checked={settings.opcUa.allowAnonymous}
+                    disabled={!canConfigure}
+                    onChange={(event) =>
+                      patchOpcUa({ allowAnonymous: event.target.checked })
+                    }
+                    type="checkbox"
+                  />
+                  <span>
+                    <strong>Allow anonymous clients</strong>
+                    <small>
+                      Disable this to require an enabled application username
+                      and password.
+                    </small>
+                  </span>
+                </label>
+              </div>
+              <div className="runtime-summary">
+                <span>
+                  <strong>{settings.opcUa.runtime.connectedClients}</strong>{" "}
+                  connected clients
+                </span>
+                <span>
+                  <strong>{settings.opcUa.runtime.requestCount}</strong>{" "}
+                  requests
+                </span>
+                <span>
+                  Last refresh{" "}
+                  <strong>
+                    {formatDateTime(settings.opcUa.runtime.lastRefreshAt)}
+                  </strong>
+                </span>
+              </div>
+              {settings.opcUa.runtime.message ? (
+                <p className="runtime-message">
+                  {settings.opcUa.runtime.message}
+                </p>
+              ) : null}
+              <div className="mapping-section">
+                <h4>Published devices</h4>
+                <p>Every tag under a selected device is published read-only.</p>
+                <div className="mapping-list">
+                  {deviceItems.map((device) => {
+                    const publication = settings.opcUa.publications.find(
+                      (item) => item.deviceId === device.id,
+                    );
+                    return (
+                      <div className="mapping-row" key={device.id}>
+                        <label className="switch-label">
+                          <input
+                            checked={publication?.enabled ?? false}
+                            disabled={!canConfigure}
+                            onChange={(event) =>
+                              changeOpcPublication(
+                                device.id,
+                                event.target.checked,
+                              )
+                            }
+                            type="checkbox"
+                          />
+                          <span>
+                            <strong>{device.name}</strong>
+                            <small>{device.tagCount} tags</small>
+                          </span>
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          </div>
+          {canConfigure ? (
+            <div className="data-server-save">
+              <p>
+                Saving restarts only the affected data server. Logger polling
+                and historian collection continue.
+              </p>
+              <button
+                className="button primary"
+                disabled={!connected || saving}
+                type="submit"
+              >
+                <Save size={14} />
+                {saving ? "Saving…" : "Save data servers"}
+              </button>
+            </div>
+          ) : null}
+        </form>
+      )}
+    </>
+  );
+}
+
+function AccountMenu({
+  onSignOut,
+  onToast,
+  token,
+  user,
+}: {
+  onSignOut: () => void;
+  onToast: (text: string) => void;
+  token?: string;
+  user: ApiUser | null;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeOutside);
+    return () => document.removeEventListener("mousedown", closeOutside);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen && !passwordOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      setPasswordOpen(false);
+      setError("");
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [menuOpen, passwordOpen]);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const currentPassword = String(form.get("currentPassword"));
+    const newPassword = String(form.get("newPassword"));
+    const confirmPassword = String(form.get("confirmPassword"));
+    if (newPassword !== confirmPassword) {
+      setError("New password and confirmation do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    try {
+      await changePassword(currentPassword, newPassword, token);
+      formElement.reset();
+      onToast("Password changed. Sign in again with the new password.");
+      onSignOut();
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : "Password could not be changed.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="account-menu" ref={menuRef}>
+        <button
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          aria-label="Open account menu"
+          className="user-chip"
+          onClick={() => setMenuOpen((current) => !current)}
+          type="button"
+        >
+          <span className="avatar">
+            {user?.username.slice(0, 2).toUpperCase() ?? "—"}
+          </span>
+          <div>
+            <p>{user?.username ?? "Authenticated user"}</p>
+            <span>{user ? roleLabel(user.role) : "Role unavailable"}</span>
+          </div>
+          <ChevronDown
+            aria-hidden="true"
+            className={`account-chevron${menuOpen ? " open" : ""}`}
+            size={14}
+          />
+        </button>
+        {menuOpen ? (
+          <div className="account-popover" role="menu">
+            <div className="account-popover-header">
+              <span className="avatar">
+                {user?.username.slice(0, 2).toUpperCase() ?? "—"}
+              </span>
+              <div>
+                <strong>{user?.username ?? "Authenticated user"}</strong>
+                <span>{user ? roleLabel(user.role) : "Role unavailable"}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setMenuOpen(false);
+                setPasswordOpen(true);
+                setError("");
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <KeyRound size={15} />
+              Change my password
+            </button>
+            <button
+              className="account-signout"
+              onClick={onSignOut}
+              role="menuitem"
+              type="button"
+            >
+              <LogOut size={15} />
+              Sign out
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {passwordOpen ? (
+        <div
+          className="modal-backdrop account-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target && !submitting) {
+              setPasswordOpen(false);
+              setError("");
+            }
+          }}
+        >
+          <section
+            aria-labelledby="change-password-title"
+            aria-modal="true"
+            className="panel account-modal"
+            role="dialog"
+          >
+            <div className="panel-header">
+              <div className="panel-title">
+                <h3 id="change-password-title">Change my password</h3>
+                <p>You will sign in again after the password changes</p>
+              </div>
+              <button
+                aria-label="Close password dialog"
+                className="icon-button compact"
+                disabled={submitting}
+                onClick={() => {
+                  setPasswordOpen(false);
+                  setError("");
+                }}
+                type="button"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <form className="password-dialog-form" onSubmit={submit}>
+              <div className="form-group">
+                <label htmlFor="current-password">Current password</label>
+                <input
+                  autoComplete="current-password"
+                  autoFocus
+                  className="form-control"
+                  id="current-password"
+                  minLength={1}
+                  name="currentPassword"
+                  required
+                  type="password"
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="new-password">New password</label>
+                <input
+                  autoComplete="new-password"
+                  className="form-control"
+                  id="new-password"
+                  minLength={1}
+                  name="newPassword"
+                  required
+                  type="password"
+                />
+                <p className="form-help">
+                  A longer password is safer, but simple passwords are allowed.
+                </p>
+              </div>
+              <div className="form-group">
+                <label htmlFor="confirm-password">Confirm new password</label>
+                <input
+                  autoComplete="new-password"
+                  className="form-control"
+                  id="confirm-password"
+                  minLength={1}
+                  name="confirmPassword"
+                  required
+                  type="password"
+                />
+              </div>
+              {error ? (
+                <p className="login-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+              <div className="button-row form-actions">
+                <button
+                  className="button secondary"
+                  disabled={submitting}
+                  onClick={() => {
+                    setPasswordOpen(false);
+                    setError("");
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="button primary"
+                  disabled={submitting}
+                  type="submit"
+                >
+                  <ShieldCheck size={14} />
+                  {submitting ? "Changing…" : "Change password"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function LoginScreen({
+  appVersion,
+  onLogin,
+}: {
+  appVersion: string;
+  onLogin: (username: string, password: string) => Promise<void>;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      await onLogin(username, password);
+    } catch {
+      setError("The username or password is incorrect.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="login-page">
+      <section className="login-card">
+        <div className="login-brand">
+          <span className="brand-mark">
+            <Waves size={20} strokeWidth={2.2} />
+          </span>
+          <div>
+            <p>Modbus Data Logger</p>
+            <span>
+              {appVersion ? `Version ${appVersion}` : "Version checking…"}
+            </span>
+          </div>
+        </div>
+        <p className="eyebrow">Secure access</p>
+        <h1>Sign in to your logger</h1>
+        <p className="login-copy">
+          Use an administrator, operator, monitoring-only, or diagnostic
+          account configured on this collector.
+        </p>
+        <form onSubmit={submit}>
+          <div className="form-group">
+            <label htmlFor="username">Username</label>
+            <input
+              autoComplete="username"
+              className="form-control"
+              id="username"
+              onChange={(event) => setUsername(event.target.value)}
+              required
+              value={username}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="password">Password</label>
+            <input
+              autoComplete="current-password"
+              className="form-control"
+              id="password"
+              minLength={1}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </div>
+          {error ? (
+            <p className="login-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <button
+            className="button primary login-submit"
+            disabled={submitting}
+            type="submit"
+          >
+            <ShieldCheck size={15} />
+            {submitting ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+        <p className="login-footnote">
+          Access attempts and configuration changes are recorded in the audit
+          log.
+        </p>
+      </section>
+    </main>
+  );
+}
+
+export function LoggerDashboard() {
+  const [activeSection, setActiveSection] = useState<Section>("overview");
+  const [dataConnectionTab, setDataConnectionTab] =
+    useState<DataConnectionTab>("historian");
+  const [administrationTab, setAdministrationTab] =
+    useState<AdministrationTab>("customer");
+  const [tagDeviceId, setTagDeviceId] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
+  const [overview, setOverview] = useState(defaultOverview);
+  const [overviewRefreshing, setOverviewRefreshing] = useState(false);
+  const [storageInfo, setStorageInfo] = useState<ApiStorageMetrics | null>(null);
+  const [systemAlerts, setSystemAlerts] = useState<ApiSystemAlert[]>([]);
+  const [tagAlarms, setTagAlarms] = useState<ApiAlarm[]>([]);
+  const [appVersion, setAppVersion] = useState("");
+  const [toast, setToast] = useState("");
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+
+  const [accessToken, setAccessToken] = useState(() =>
+    typeof window === "undefined"
+      ? ""
+      : (window.sessionStorage.getItem("logger-access-token") ?? ""),
+  );
+
+  const sectionTitle = useMemo(() => {
+    if (activeSection === "tags") return "Device tags";
+    const items = [...monitorNav, ...workflowNav, ...platformNav];
+    return items.find((item) => item.id === activeSection)?.label ?? "Overview";
+  }, [activeSection]);
+
+  const visiblePlatformNav = useMemo(() => {
+    if (currentUser?.role === "administrator") return platformNav;
+    if (currentUser?.role === "diagnostic") {
+      return platformNav.filter(
+        (item) => item.id === "dataConnections" || item.id === "activity",
+      );
+    }
+    return [];
+  }, [currentUser?.role]);
+
+  const unacknowledgedAlertCount =
+    apiStatus === "connected"
+      ? systemAlerts.filter(
+          (item) =>
+            item.state === "active" && !item.resolvedAt && !item.acknowledgedAt,
+        ).length + tagAlarms.filter((item) => !item.acknowledgedAt).length
+      : 0;
+
+  const refreshActiveAlerts = useCallback(async () => {
+    if (apiStatus !== "connected") return;
+    const [systemResult, tagResult] = await Promise.allSettled([
+      fetchSystemAlerts(accessToken || undefined, {
+        activeOnly: false,
+        limit: 250,
+      }),
+      fetchAlarms(accessToken || undefined),
+    ]);
+    if (systemResult.status === "fulfilled") {
+      setSystemAlerts(systemResult.value);
+    }
+    if (tagResult.status === "fulfilled") {
+      setTagAlarms(tagResult.value);
+    }
+    if (systemResult.status === "rejected" && tagResult.status === "rejected") {
+      throw new Error("Alerts could not be refreshed");
+    }
+  }, [accessToken, apiStatus]);
+
+  const refreshOverview = useCallback(
+    async (showFailure = false) => {
+      if (apiStatus !== "connected") return;
+      setOverviewRefreshing(true);
+      try {
+        setOverview(await fetchOverview(undefined, accessToken || undefined));
+      } catch (requestError) {
+        if (showFailure) {
+          setToast(
+            requestError instanceof ApiError
+              ? requestError.message
+              : "Overview could not be refreshed.",
+          );
+        }
+      } finally {
+        setOverviewRefreshing(false);
+      }
+    },
+    [accessToken, apiStatus],
+  );
+
+  const showToast = useCallback(
+    (text: string) => {
+      setToast(text);
+      void refreshOverview(false);
+    },
+    [refreshOverview],
+  );
+
+  useEffect(() => {
+    let active = true;
+    const loadHealth = () =>
+      fetchHealth()
+        .then((response) => {
+          if (active) setAppVersion(response.version);
+        })
+        .catch(() => undefined);
+    void loadHealth();
+    const interval = window.setInterval(loadHealth, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    Promise.all([
+      fetchOverview(controller.signal, accessToken),
+      fetchCurrentUser(accessToken || undefined),
+    ])
+      .then(([overviewResponse, userResponse]) => {
+        setOverview(overviewResponse);
+        setCurrentUser(userResponse);
+        if (userResponse.role === "diagnostic") {
+          setDataConnectionTab("protocols");
+        }
+        setApiStatus("connected");
+      })
+      .catch((error: unknown) =>
+        setApiStatus(
+          error instanceof ApiError && error.status === 401
+            ? "unauthorized"
+            : "offline",
+        ),
+      );
+
+    return () => controller.abort();
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (apiStatus !== "connected") return;
+
+    // Fetch storage metrics for admin/diagnostic users
+    let active = true;
+    if (currentUser?.role === "administrator" || currentUser?.role === "diagnostic") {
+      fetchStorageInfo(accessToken || undefined)
+        .then((response) => {
+          if (active) setStorageInfo(response);
+        })
+        .catch(() => {
+          // Storage info is optional - ignore errors
+        });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [accessToken, apiStatus, currentUser?.role]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(""), 2600);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  useEffect(() => {
+    if (apiStatus !== "connected" || !accessToken) return;
+    const interval = window.setInterval(() => {
+      fetchCurrentUser(accessToken)
+        .then((user) => {
+          setCurrentUser(user);
+          if (user.role === "diagnostic") {
+            setDataConnectionTab("protocols");
+          }
+        })
+        .catch((requestError: unknown) => {
+          if (requestError instanceof ApiError && requestError.status === 401) {
+            window.sessionStorage.removeItem("logger-access-token");
+            setAccessToken("");
+            setCurrentUser(null);
+            setApiStatus("unauthorized");
+            setActiveSection("overview");
+          }
+        });
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [accessToken, apiStatus]);
+
+  useEffect(() => {
+    if (apiStatus !== "connected") return;
+    const initialLoad = window.setTimeout(() => {
+      void refreshActiveAlerts().catch(() => undefined);
+    }, 0);
+    const interval = window.setInterval(() => {
+      void refreshActiveAlerts().catch(() => undefined);
+    }, 15_000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+    };
+  }, [apiStatus, refreshActiveAlerts]);
+
+  useEffect(() => {
+    if (apiStatus !== "connected") return;
+    const initialRefresh = window.setTimeout(() => {
+      if (activeSection === "overview") {
+        void refreshOverview(false);
+      }
+    }, 0);
+    const interval = window.setInterval(() => {
+      void refreshOverview(false);
+    }, 15_000);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+    };
+  }, [activeSection, apiStatus, refreshOverview]);
+
+  function navigate(section: Section) {
+    setActiveSection(section);
+    setSidebarOpen(false);
+    // Sync URL hash with active section for browser history & direct access
+    window.history.pushState(null, "", `#${section}`);
+    if (section === "overview") {
+      void refreshOverview(false);
+    }
+  }
+
+  function openTags(deviceId?: string) {
+    setTagDeviceId(deviceId ?? "");
+    navigate("tags");
+  }
+
+  function openDataConnections(tab: DataConnectionTab) {
+    setDataConnectionTab(tab);
+    navigate("dataConnections");
+  }
+
+  function openAdministration(tab: AdministrationTab) {
+    setAdministrationTab(tab);
+    navigate("administration");
+  }
+
+
+
+  function renderSection() {
+    switch (activeSection) {
+      case "devices":
+        return (
+          <DevicesView
+            canAdd={
+              currentUser?.role === "administrator" ||
+              currentUser?.role === "operator"
+            }
+            canManage={currentUser?.role === "administrator"}
+            connected={apiStatus === "connected"}
+            onManageTags={openTags}
+            onOpenClassificationSettings={() => openAdministration("system")}
+            onOpenPostgresSettings={() => openDataConnections("historian")}
+            onToast={showToast}
+            token={accessToken || undefined}
+          />
+        );
+      case "live":
+        return (
+          <LiveDataView
+            connected={apiStatus === "connected"}
+            onManageTags={openTags}
+            token={accessToken || undefined}
+          />
+        );
+      case "tags":
+        return (
+          <>
+            <div className="context-route">
+              <button
+                className="context-route-back"
+                onClick={() => navigate("devices")}
+                type="button"
+              >
+                <Network size={14} />
+                Devices
+              </button>
+              <span aria-hidden="true">/</span>
+              <strong>Tag configuration</strong>
+              <p>
+                Tags belong to a device, so this workspace opens from Devices
+                or Live data.
+              </p>
+            </div>
+            <TagsView
+              canConfigure={currentUser?.role === "administrator"}
+              connected={apiStatus === "connected"}
+              initialDeviceId={tagDeviceId}
+              onToast={showToast}
+              token={accessToken || undefined}
+            />
+          </>
+        );
+      case "alarms":
+        return (
+          <AlarmsView
+            canAcknowledge={
+              currentUser?.role === "administrator" ||
+              currentUser?.role === "operator"
+            }
+            canConfigure={currentUser?.role === "administrator"}
+            connected={apiStatus === "connected"}
+            onRefresh={refreshActiveAlerts}
+            onToast={showToast}
+            systemItems={systemAlerts}
+            tagItems={tagAlarms}
+            token={accessToken || undefined}
+          />
+        );
+      case "categoryAlarms":
+        return (
+          <CategoryAlarmsView
+            canConfigure={currentUser?.role === "administrator"}
+            connected={apiStatus === "connected"}
+            onToast={showToast}
+            token={accessToken || undefined}
+          />
+        );
+      case "tagAlarms":
+        return (
+          <TagAlarmsView
+            connected={apiStatus === "connected"}
+            onToast={showToast}
+            token={accessToken || undefined}
+          />
+        );
+      case "reports":
+        return (
+          <NewReportsView
+            connected={apiStatus === "connected"}
+            onToast={showToast}
+            token={accessToken || undefined}
+          />
+        );
+      case "dataConnections":
+        return currentUser?.role === "administrator" ||
+          currentUser?.role === "diagnostic" ? (
+          <>
+            <WorkspaceTabs
+              label="Data connection sections"
+              onChange={setDataConnectionTab}
+              tabs={
+                currentUser.role === "administrator"
+                  ? [
+                      {
+                        id: "historian" as const,
+                        label: "Historian",
+                        description: "PostgreSQL, retention & cache",
+                        icon: Database,
+                      },
+                      {
+                        id: "protocols" as const,
+                        label: "Protocol servers",
+                        description: "Modbus TCP & OPC UA",
+                        icon: ServerCog,
+                      },
+                    ]
+                  : [
+                      {
+                        id: "protocols" as const,
+                        label: "Protocol servers",
+                        description: "Modbus TCP & OPC UA",
+                        icon: ServerCog,
+                      },
+                    ]
+              }
+              value={
+                currentUser.role === "administrator"
+                  ? dataConnectionTab
+                  : "protocols"
+              }
+            />
+            {currentUser.role === "administrator" &&
+            dataConnectionTab === "historian" ? (
+              <PostgresSettingsView
+                canConfigure={currentUser.role === "administrator"}
+                connected={apiStatus === "connected"}
+                onToast={showToast}
+                token={accessToken || undefined}
+              />
+            ) : (
+              <DataServersView
+                canConfigure={currentUser.role === "administrator"}
+                connected={apiStatus === "connected"}
+                onToast={showToast}
+                token={accessToken || undefined}
+              />
+            )}
+          </>
+        ) : (
+          <Overview
+            canAddDevice={false}
+            connected={apiStatus === "connected"}
+            onNavigate={navigate}
+            onRefresh={() => void refreshOverview(true)}
+            overview={overview}
+            refreshing={overviewRefreshing}
+            username={currentUser?.username ?? ""}
+          />
+        );
+      case "administration":
+        return currentUser?.role === "administrator" ? (
+          <>
+            <WorkspaceTabs
+              label="Administration sections"
+              onChange={setAdministrationTab}
+              tabs={[
+                {
+                  id: "users",
+                  label: "Users",
+                  description: "Accounts & permissions",
+                  icon: Users,
+                },
+                {
+                  id: "system",
+                  label: "System tools",
+                  description: "Backup, update, VPN & categories",
+                  icon: Settings,
+                },
+              ]}
+              value={administrationTab}
+            />
+            {administrationTab === "users" ? (
+              <UserManagementView
+                connected={apiStatus === "connected"}
+                currentUser={currentUser}
+                onToast={showToast}
+                token={accessToken || undefined}
+              />
+            ) : (
+              <SettingsView
+                appVersion={appVersion}
+                canConfigure
+                connected={apiStatus === "connected"}
+                onFactoryReset={handleSignOut}
+                onToast={showToast}
+                token={accessToken || undefined}
+              />
+            )}
+          </>
+        ) : (
+          <Overview
+            canAddDevice={false}
+            connected={apiStatus === "connected"}
+            onNavigate={navigate}
+            onRefresh={() => void refreshOverview(true)}
+            overview={overview}
+            refreshing={overviewRefreshing}
+            username={currentUser?.username ?? ""}
+          />
+        );
+      case "activity":
+        return currentUser?.role === "administrator" ||
+          currentUser?.role === "diagnostic" ? (
+          <ActivityDiagnosticsView
+            connected={apiStatus === "connected"}
+            onToast={showToast}
+            token={accessToken || undefined}
+          />
+        ) : null;
+      default:
+        return (
+          <Overview
+            canAddDevice={
+              currentUser?.role === "administrator" ||
+              currentUser?.role === "operator"
+            }
+            connected={apiStatus === "connected"}
+            onNavigate={navigate}
+            onRefresh={() => void refreshOverview(true)}
+            overview={overview}
+            refreshing={overviewRefreshing}
+            username={currentUser?.username ?? ""}
+          />
+        );
+    }
+  }
+
+  async function handleLogin(username: string, password: string) {
+    const result = await login(username, password);
+    window.sessionStorage.setItem("logger-access-token", result.token);
+    setAccessToken(result.token);
+    setCurrentUser(result.user);
+    setDataConnectionTab(
+      result.user.role === "diagnostic" ? "protocols" : "historian",
+    );
+    const freshOverview = await fetchOverview(undefined, result.token);
+    setOverview(freshOverview);
+    setApiStatus("connected");
+  }
+
+  function handleSignOut() {
+    window.sessionStorage.removeItem("logger-access-token");
+    setAccessToken("");
+    setCurrentUser(null);
+    setApiStatus("unauthorized");
+    setActiveSection("overview");
+  }
+
+  if (apiStatus === "unauthorized") {
+    return <LoginScreen appVersion={appVersion} onLogin={handleLogin} />;
+  }
+
+  return (
+    <div className="app-shell">
+      {sidebarOpen ? (
+        <button
+          aria-label="Close navigation"
+          className="drawer-backdrop"
+          onClick={() => setSidebarOpen(false)}
+          type="button"
+        />
+      ) : null}
+      <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
+        <div className="brand-lockup">
+          <span className="brand-mark">
+            <Waves size={20} strokeWidth={2.2} />
+          </span>
+          <div>
+            <p className="brand-title">Modbus Data Logger</p>
+            <p className="brand-version">
+              {appVersion ? `Version ${appVersion}` : "Version checking…"}
+            </p>
+          </div>
+        </div>
+
+        <p className="nav-label">Operations</p>
+        <nav className="nav-list" aria-label="Operations">
+          {monitorNav.map((item) => {
+            const Icon = item.icon;
+            const active =
+              activeSection === item.id ||
+              (item.id === "devices" && activeSection === "tags");
+            return (
+              <button
+                aria-current={active ? "page" : undefined}
+                className={`nav-button${active ? " active" : ""}`}
+                key={item.id}
+                onClick={() => navigate(item.id)}
+                type="button"
+              >
+                <Icon size={16} strokeWidth={1.8} />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        <p className="nav-label nav-label-spaced">
+          Workflows
+        </p>
+        <nav className="nav-list" aria-label="Workflows">
+          {workflowNav.map((item) => {
+            const Icon = item.icon;
+            const badge = item.id === "alarms" ? unacknowledgedAlertCount : 0;
+            return (
+              <button
+                aria-label={
+                  item.id === "alarms" ? "Alerts (formerly Alarms)" : undefined
+                }
+                aria-current={activeSection === item.id ? "page" : undefined}
+                className={`nav-button${activeSection === item.id ? " active" : ""}`}
+                key={item.id}
+                onClick={() => navigate(item.id)}
+                type="button"
+              >
+                <Icon size={16} strokeWidth={1.8} />
+                {item.label}
+                {badge > 0 ? (
+                  <span
+                    aria-label={`${badge} unacknowledged alerts`}
+                    className="nav-badge"
+                  >
+                    {badge > 99 ? "99+" : badge}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+
+        {visiblePlatformNav.length > 0 ? (
+          <>
+            <p className="nav-label nav-label-spaced">System</p>
+            <nav className="nav-list" aria-label="System">
+              {visiblePlatformNav.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    aria-current={
+                      activeSection === item.id ? "page" : undefined
+                    }
+                    className={`nav-button${activeSection === item.id ? " active" : ""}`}
+                    key={item.id}
+                    onClick={() => navigate(item.id)}
+                    type="button"
+                  >
+                    <Icon size={16} strokeWidth={1.8} />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </nav>
+          </>
+        ) : null}
+
+        <div className="sidebar-footer">
+          <div className="gateway-card">
+            <div className="gateway-card-top">
+              <p className="gateway-name">Logger service</p>
+              <span className="pulse-dot" />
+            </div>
+            <p className="gateway-meta">127.0.0.1:4100 · primary</p>
+          </div>
+        </div>
+      </aside>
+
+      <main className="main-shell">
+        <header className="topbar">
+          <button
+            aria-label={sidebarOpen ? "Close navigation" : "Open navigation"}
+            className="mobile-menu"
+            onClick={() => setSidebarOpen((value) => !value)}
+            type="button"
+          >
+            {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+          <div className="topbar-heading">
+            <h1>{sectionTitle}</h1>
+            <p>
+              {appVersion ? `Version ${appVersion}` : "Version checking…"}
+            </p>
+          </div>
+          <div className="header-actions">
+
+            <span className="connection-pill">
+              <span className="pulse-dot" />
+              <span>
+                {apiStatus === "connected"
+                  ? "Collector online"
+                  : apiStatus === "checking"
+                    ? "Connecting"
+                    : "Preview data"}
+              </span>
+            </span>
+            <button
+              aria-label={
+                unacknowledgedAlertCount > 0
+                  ? `${unacknowledgedAlertCount} unacknowledged alerts`
+                  : "Open alerts"
+              }
+              className="icon-button"
+              onClick={() => navigate("alarms")}
+              type="button"
+            >
+              <Bell size={15} />
+              {unacknowledgedAlertCount > 0 ? (
+                <span className="notification-count">
+                  {unacknowledgedAlertCount > 9
+                    ? "9+"
+                    : unacknowledgedAlertCount}
+                </span>
+              ) : null}
+            </button>
+            <AccountMenu
+              onSignOut={handleSignOut}
+              onToast={showToast}
+              token={accessToken || undefined}
+              user={currentUser}
+            />
+          </div>
+        </header>
+
+        <div className="content">{renderSection()}</div>
+      </main>
+
+      {toast ? (
+        <div className="toast" role="status">
+          <CircleGauge size={15} />
+          {toast}
+        </div>
+      ) : null}
+    </div>
+  );
+}

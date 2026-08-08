@@ -1,0 +1,82 @@
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      collector:
+        condition: service_healthy
+
+  collector:
+    build:
+      context: ./server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4100
+      DATABASE_PATH: /app/data/logger.db
+      APP_VERSION: ${APP_VERSION:-1.3.0}
+      LICENSE_ACTIVATION_DAYS: ${LICENSE_ACTIVATION_DAYS:-30}
+      SYSTEM_ADMIN_DATA_DIR: /app/data/system-admin
+      SYSTEM_UPDATE_HELPER: ${SYSTEM_UPDATE_HELPER:-/usr/local/sbin/modbus-logger-update}
+      OPENVPN_HELPER: ${OPENVPN_HELPER:-/usr/local/sbin/modbus-logger-openvpn}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      AUTH_DISABLED: "false"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.docker}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?Set SETTINGS_ENCRYPTION_KEY in .env.docker}
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?Set INITIAL_ADMIN_PASSWORD in .env.docker}
+      RETENTION_DAYS: ${RETENTION_DAYS:-365}
+      POLLING_ENABLED: "true"
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-logger}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@postgres:5432/${POSTGRES_DB:-modbus_logger}
+      POSTGRES_SSL: "false"
+    ports:
+      - "4100:4100"
+      - "1502:1502"
+      - "4840:4840"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - logger-data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4100/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-modbus_logger}
+      POSTGRES_USER: ${POSTGRES_USER:-logger}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-logger} -d ${POSTGRES_DB:-modbus_logger}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  logger-data:
+  postgres-data:
