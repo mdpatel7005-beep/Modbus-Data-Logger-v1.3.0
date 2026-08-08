@@ -1360,6 +1360,14 @@ export class PostgresHistorian {
       this.lastSavedAtByDevice.set(device.id, sampleAtMs);
       this.lastOfflineQueueWarningAtByDevice.delete(device.id);
     } catch (error) {
+      // Debug logging to see actual error
+      if (error instanceof Error) {
+        const postgresError = error as { code?: string };
+        this.logger.warn(
+          { deviceId: device.id, errorCode: postgresError.code },
+          "PostgreSQL write error details",
+        );
+      }
       if (isPostgresSchemaMissingError(error)) {
         if (this.runtime.offlineCacheEnabled) {
           this.queueOfflineSample(

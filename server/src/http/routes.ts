@@ -985,10 +985,12 @@ export async function registerRoutes(
         return reply.code(result.schema ? 200 : 400).send(result);
       } catch (error) {
         const device = database.getDevice(id);
-        const message =
-          error instanceof Error
-            ? error.message.slice(0, 500)
-            : "Unknown PostgreSQL connection failure";
+        let message = "Unknown PostgreSQL connection failure";
+        if (error instanceof Error) {
+          message = error.message.slice(0, 500);
+        } else if (typeof error === "object" && error !== null && "message" in error) {
+          message = String((error as { message: unknown }).message).slice(0, 500);
+        }
         database.appendAudit({
           actorId: request.principal?.id,
           action:
@@ -1008,7 +1010,11 @@ export async function registerRoutes(
           });
         }
         request.log.error(
-          { error, deviceId: id },
+          { 
+            error: message, 
+            deviceId: id,
+            errorType: error instanceof Error ? error.constructor.name : typeof error
+          },
           "PostgreSQL device connection verification failed",
         );
         return reply.code(502).send({
