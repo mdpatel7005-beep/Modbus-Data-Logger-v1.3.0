@@ -24,6 +24,13 @@ build/
 .env.local
 .env.production
 
+# VS Code and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
 # OS files
 .DS_Store
 Thumbs.db
