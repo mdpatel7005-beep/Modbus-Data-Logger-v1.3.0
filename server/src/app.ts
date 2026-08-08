@@ -158,10 +158,10 @@ export async function buildApplication() {
       });
     }
 
-    request.log.error({ error }, "request failed");
+    request.log.error({ error, stack: (error as Error)?.stack }, "request failed");
     return reply.code(500).send({
       error: "internal_error",
-      message: "The collector could not complete the request",
+      message: (error as Error)?.message ?? "The collector could not complete the request",
       requestId: request.id,
     });
   });
